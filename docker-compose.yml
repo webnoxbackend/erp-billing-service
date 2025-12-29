@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: example-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: example_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: example-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  example-service:
+    build: .
+    container_name: example-service
+    ports:
+      - "50051:50051"
+      - "8081:8081"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/example_db?sslmode=disable
+      REDIS_URL: redis:6379
+      GRPC_PORT: 50051
+      HTTP_PORT: 8081
+      JWT_SECRET: your-secret-key-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    command: go run ./cmd/server
+
+volumes:
+  postgres_data:
+  redis_data:
+

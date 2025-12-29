@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package example;
+option go_package = "example-service/proto";
+
+import "google/api/annotations.proto";
+
+service ExampleService {
+  rpc CreateExample(CreateExampleRequest) returns (CreateExampleResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/examples"
+      body: "*"
+    };
+  }
+  rpc GetExample(GetExampleRequest) returns (GetExampleResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/examples/{id}"
+    };
+  }
+  rpc ListExamples(ListExamplesRequest) returns (ListExamplesResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/examples"
+    };
+  }
+  rpc UpdateExample(UpdateExampleRequest) returns (UpdateExampleResponse) {
+    option (google.api.http) = {
+      put: "/api/v1/examples/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteExample(DeleteExampleRequest) returns (DeleteExampleResponse) {
+    option (google.api.http) = {
+      delete: "/api/v1/examples/{id}"
+    };
+  }
+}
+
+message CreateExampleRequest {
+  string name = 1;
+}
+
+message CreateExampleResponse {
+  int64 id = 1;
+  string name = 2;
+  string status = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message GetExampleRequest {
+  int64 id = 1;
+}
+
+message GetExampleResponse {
+  int64 id = 1;
+  string name = 2;
+  string status = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message ListExamplesRequest {
+}
+
+message ListExamplesResponse {
+  repeated ExampleResponse examples = 1;
+}
+
+message ExampleResponse {
+  int64 id = 1;
+  string name = 2;
+  string status = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message UpdateExampleRequest {
+  int64 id = 1;
+  string name = 2;
+  string status = 3;
+}
+
+message UpdateExampleResponse {
+  int64 id = 1;
+  string name = 2;
+  string status = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message DeleteExampleRequest {
+  int64 id = 1;
+}
+
+message DeleteExampleResponse {
+  bool success = 1;
+  string message = 2;
+}
+
