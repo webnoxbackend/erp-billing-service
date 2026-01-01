@@ -50,11 +50,12 @@ func main() {
 	// 5. Initialize Repositories
 	invoiceRepo := postgres.NewInvoiceRepository(db)
 	paymentRepo := postgres.NewPaymentRepository(db)
+	auditRepo := postgres.NewAuditLogRepository(db)
 	rmRepo := postgres.NewReadModelRepository(db)
 	eventPublisher := kafka_outbound.NewEventPublisher(producer)
 
 	// 6. Initialize Services
-	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, eventPublisher)
+	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher)
 	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, eventPublisher)
 	_ = paymentService // Reserved for future payment endpoints
 
@@ -81,6 +82,8 @@ func main() {
 	api.HandleFunc("/billing/invoices/{id}", invoiceHandler.GetInvoice).Methods("GET")
 	api.HandleFunc("/billing/invoices/{id}", invoiceHandler.UpdateInvoice).Methods("PUT")
 	api.HandleFunc("/billing/invoices/{id}", invoiceHandler.DeleteInvoice).Methods("DELETE")
+	api.HandleFunc("/billing/invoices/{id}/status", invoiceHandler.UpdateStatus).Methods("PATCH")
+	api.HandleFunc("/billing/invoices/{id}/audit-logs", invoiceHandler.GetAuditLogs).Methods("GET")
 
 	// Read Model Search Routes (for UI Autocomplete)
 	api.HandleFunc("/billing/search/customers", rmHandler.SearchCustomers).Methods("GET")

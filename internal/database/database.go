@@ -89,6 +89,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&domain.CustomerRM{},
 		&domain.ContactRM{},
 		&domain.ItemRM{},
+		&domain.InvoiceAuditLog{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)

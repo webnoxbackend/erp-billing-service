@@ -88,3 +88,15 @@ type Payment struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
+
+type InvoiceAuditLog struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID `gorm:"type:uuid;index" json:"organization_id"`
+	InvoiceID      uuid.UUID `gorm:"type:uuid;index" json:"invoice_id"`
+	Action         string    `gorm:"type:varchar(100)" json:"action"`
+	OldStatus      string    `gorm:"type:varchar(50)" json:"old_status"`
+	NewStatus      string    `gorm:"type:varchar(50)" json:"new_status"`
+	Notes          string    `gorm:"type:text" json:"notes"`
+	PerformedBy    string    `gorm:"type:varchar(255)" json:"performed_by"`
+	CreatedAt      time.Time `json:"created_at"`
+}

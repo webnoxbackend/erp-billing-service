@@ -29,7 +29,7 @@ proto:
 		echo "Downloading googleapis..."; \
 		git clone --depth 1 https://github.com/googleapis/googleapis.git /tmp/googleapis; \
 	fi
-	protoc -I. -I/tmp/googleapis --go_out=. --go-grpc_out=. proto/example.proto
+	protoc -I. -I/tmp/googleapis --go_out=. --go_opt=module=erp-billing-service --go-grpc_out=. --go-grpc_opt=module=erp-billing-service proto/example.proto
 	@echo "Protobuf code generated successfully"
 
 # Docker commands

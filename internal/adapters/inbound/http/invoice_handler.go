@@ -6,6 +6,7 @@ import (
 
 	"erp-billing-service/internal/application"
 	"erp-billing-service/internal/application/dto"
+	"erp-billing-service/internal/domain"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -121,4 +122,47 @@ func (h *InvoiceHandler) DeleteInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *InvoiceHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, _ := uuid.Parse(vars["id"])
+
+	var req struct {
+		Status string `json:"status"`
+		Notes  string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// In a real app, performedBy would come from auth context
+	performedBy := "System User"
+	if r.Header.Get("X-User-Name") != "" {
+		performedBy = r.Header.Get("X-User-Name")
+	}
+
+	err := h.service.UpdateStatus(r.Context(), id, domain.InvoiceStatus(req.Status), req.Notes, performedBy)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Status updated successfully"})
+}
+
+func (h *InvoiceHandler) GetAuditLogs(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, _ := uuid.Parse(vars["id"])
+
+	logs, err := h.service.GetAuditLogs(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
 }

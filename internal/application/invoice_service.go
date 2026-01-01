@@ -15,17 +15,20 @@ import (
 type InvoiceService struct {
 	invoiceRepo    domain.InvoiceRepository
 	rmRepo         domain.ReadModelRepository
-	eventPublisher domain.EventPublisher // I'll define this port next
+	auditRepo      domain.AuditLogRepository
+	eventPublisher domain.EventPublisher
 }
 
 func NewInvoiceService(
 	invoiceRepo domain.InvoiceRepository,
 	rmRepo domain.ReadModelRepository,
+	auditRepo domain.AuditLogRepository,
 	eventPublisher domain.EventPublisher,
 ) *InvoiceService {
 	return &InvoiceService{
 		invoiceRepo:    invoiceRepo,
 		rmRepo:         rmRepo,
+		auditRepo:      auditRepo,
 		eventPublisher: eventPublisher,
 	}
 }
@@ -369,4 +372,45 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 	}
 
 	return res
+}
+
+func (s *InvoiceService) UpdateStatus(ctx context.Context, id uuid.UUID, newStatus domain.InvoiceStatus, notes string, performedBy string) error {
+	invoice, err := s.invoiceRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if invoice == nil {
+		return fmt.Errorf("invoice not found")
+	}
+
+	oldStatus := string(invoice.Status)
+	invoice.Status = newStatus
+
+	if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
+		return err
+	}
+
+	// Record Audit Log
+	auditLog := &domain.InvoiceAuditLog{
+		ID:             uuid.New(),
+		OrganizationID: invoice.OrganizationID,
+		InvoiceID:      invoice.ID,
+		Action:         "status_change",
+		OldStatus:      oldStatus,
+		NewStatus:      string(newStatus),
+		Notes:          notes,
+		PerformedBy:    performedBy,
+		CreatedAt:      time.Now().UTC(),
+	}
+
+	if err := s.auditRepo.Create(ctx, auditLog); err != nil {
+		// Log error but don't fail the operation
+		fmt.Printf("failed to create audit log: %v\n", err)
+	}
+
+	return nil
+}
+
+func (s *InvoiceService) GetAuditLogs(ctx context.Context, invoiceID uuid.UUID) ([]domain.InvoiceAuditLog, error) {
+	return s.auditRepo.ListByInvoiceID(ctx, invoiceID)
 }

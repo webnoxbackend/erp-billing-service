@@ -29,3 +29,8 @@ type ReadModelRepository interface {
 	GetContact(ctx context.Context, id uuid.UUID) (*ContactRM, error)
 	SearchContacts(ctx context.Context, orgID uuid.UUID, customerID uuid.UUID, query string) ([]ContactRM, error)
 }
+
+type AuditLogRepository interface {
+	Create(ctx context.Context, log *InvoiceAuditLog) error
+	ListByInvoiceID(ctx context.Context, invoiceID uuid.UUID) ([]InvoiceAuditLog, error)
+}
