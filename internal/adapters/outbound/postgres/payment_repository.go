@@ -1,0 +1,28 @@
+package postgres
+
+import (
+	"context"
+
+	"erp-billing-service/internal/domain"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+type PaymentRepository struct {
+	db *gorm.DB
+}
+
+func NewPaymentRepository(db *gorm.DB) *PaymentRepository {
+	return &PaymentRepository{db: db}
+}
+
+func (r *PaymentRepository) Create(ctx context.Context, payment *domain.Payment) error {
+	return r.db.WithContext(ctx).Create(payment).Error
+}
+
+func (r *PaymentRepository) GetByInvoiceID(ctx context.Context, invoiceID uuid.UUID) ([]domain.Payment, error) {
+	var payments []domain.Payment
+	err := r.db.WithContext(ctx).Where("invoice_id = ?", invoiceID).Find(&payments).Error
+	return payments, err
+}

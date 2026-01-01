@@ -1,0 +1,124 @@
+package http
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"erp-billing-service/internal/application"
+	"erp-billing-service/internal/application/dto"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+)
+
+type InvoiceHandler struct {
+	service *application.InvoiceService
+}
+
+func NewInvoiceHandler(service *application.InvoiceService) *InvoiceHandler {
+	return &InvoiceHandler{service: service}
+}
+
+func (h *InvoiceHandler) CreateInvoice(w http.ResponseWriter, r *http.Request) {
+	var req dto.CreateInvoiceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// In a real app, orgID would come from the auth token context
+	orgIDStr := r.Header.Get("X-Organization-ID")
+	orgID, _ := uuid.Parse(orgIDStr)
+	if orgID == uuid.Nil {
+		// Default for testing if header is missing
+		orgID = uuid.New()
+	}
+
+	invoice, err := h.service.CreateInvoice(r.Context(), orgID, req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(invoice)
+}
+
+func (h *InvoiceHandler) UpdateInvoice(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := uuid.Parse(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid Invoice ID", http.StatusBadRequest)
+		return
+	}
+
+	var req dto.CreateInvoiceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Assuming UpdateInvoice logic in service returns updated invoice or error
+	invoice, err := h.service.UpdateInvoice(r.Context(), id, req)
+	if err != nil {
+		if err.Error() == "invoice not found" {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(invoice)
+}
+
+func (h *InvoiceHandler) ListInvoices(w http.ResponseWriter, r *http.Request) {
+	orgIDStr := r.Header.Get("X-Organization-ID")
+	orgID, _ := uuid.Parse(orgIDStr)
+
+	invoices, err := h.service.ListInvoices(r.Context(), orgID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(invoices)
+}
+
+func (h *InvoiceHandler) GetInvoice(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, _ := uuid.Parse(vars["id"])
+
+	invoice, err := h.service.GetInvoice(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(invoice)
+}
+
+func (h *InvoiceHandler) DeleteInvoice(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := uuid.Parse(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid Invoice ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.service.DeleteInvoice(r.Context(), id); err != nil {
+		if err.Error() == "invoice not found" {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -1,7 +1,7 @@
 package postgres
 
 import (
-	"example-service/internal/domain"
+	"erp-billing-service/internal/domain"
 	"gorm.io/gorm"
 )
 

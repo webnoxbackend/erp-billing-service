@@ -1,11 +1,11 @@
 package grpc
 
 import (
-	"example-service/internal/application/dto"
-	"example-service/internal/domain"
-	"example-service/internal/ports/services"
-	proto "example-service/example-service/proto"
 	"context"
+	"erp-billing-service/internal/application/dto"
+	"erp-billing-service/internal/domain"
+	"erp-billing-service/internal/ports/services"
+	proto "erp-billing-service/proto"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -149,4 +149,3 @@ func (h *Handler) mapError(err error) error {
 		return status.Errorf(codes.Internal, "internal error: %v", err)
 	}
 }
-

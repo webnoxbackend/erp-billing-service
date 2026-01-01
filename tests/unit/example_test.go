@@ -1,7 +1,7 @@
 package unit
 
 import (
-	"example-service/internal/domain"
+	"erp-billing-service/internal/domain"
 	"testing"
 )
 

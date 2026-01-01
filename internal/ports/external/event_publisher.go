@@ -1,6 +1,6 @@
 package external
 
-import "example-service/internal/domain"
+import "erp-billing-service/internal/domain"
 
 // EventPublisher defines the interface for publishing domain events
 type EventPublisher interface {

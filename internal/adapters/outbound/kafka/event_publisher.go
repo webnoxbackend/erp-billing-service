@@ -1,27 +1,26 @@
 package kafka
 
 import (
-	"example-service/internal/domain"
-	"example-service/internal/ports/external"
-	"log"
+	"context"
+
+	shared_events "github.com/efs/shared-events"
+	shared_kafka "github.com/efs/shared-kafka"
 )
 
-// EventPublisher implements the event publisher interface using Kafka
 type EventPublisher struct {
-	// In a real implementation, this would contain a Kafka producer
-	// For now, it's a placeholder that logs events
+	producer shared_kafka.Producer
 }
 
-// NewEventPublisher creates a new Kafka event publisher
-func NewEventPublisher() external.EventPublisher {
-	return &EventPublisher{}
+func NewEventPublisher(producer shared_kafka.Producer) *EventPublisher {
+	return &EventPublisher{producer: producer}
 }
 
-// Publish publishes a domain event
-func (p *EventPublisher) Publish(event *domain.Event) error {
-	// TODO: Implement actual Kafka publishing
-	// For now, just log the event
-	log.Printf("[EventPublisher] Publishing event: Type=%s, Timestamp=%v", event.Type, event.Timestamp)
-	return nil
-}
+func (p *EventPublisher) Publish(ctx context.Context, metadata shared_events.EventMetadata, payload interface{}) error {
+	data, err := shared_events.Marshal(metadata, payload)
+	if err != nil {
+		return err
+	}
 
+	topic := shared_events.GetTopicForEventType(metadata.EventType)
+	return p.producer.Publish(ctx, topic, metadata.AggregateID, data)
+}

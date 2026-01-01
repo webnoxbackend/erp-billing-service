@@ -1,6 +1,6 @@
 package repositories
 
-import "example-service/internal/domain"
+import "erp-billing-service/internal/domain"
 
 // ExampleRepository defines the interface for example data operations
 type ExampleRepository interface {

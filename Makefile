@@ -2,11 +2,11 @@
 
 # Build the application
 build:
-	go build -o bin/example-service ./cmd/server
+	go build -o bin/billing-service ./cmd/api
 
 # Run the application
 run:
-	go run ./cmd/server
+	go run ./cmd/api/main.go
 
 # Run tests
 test:

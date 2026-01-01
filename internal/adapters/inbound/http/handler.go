@@ -2,8 +2,8 @@ package http
 
 import (
 	"encoding/json"
-	"example-service/internal/application/dto"
-	"example-service/internal/ports/services"
+	"erp-billing-service/internal/application/dto"
+	"erp-billing-service/internal/ports/services"
 	"net/http"
 	"strconv"
 

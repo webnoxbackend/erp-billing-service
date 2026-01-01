@@ -36,7 +36,7 @@ func Load() (*Config, error) {
 		RedisURL:           getEnv("REDIS_URL", "localhost:6379"),
 		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
 		GRPCPort:           getEnv("GRPC_PORT", "50051"),
-		HTTPPort:           getEnv("HTTP_PORT", "8081"),
+		HTTPPort:           getEnv("HTTP_PORT", "8088"),
 		JWTSecret:          getEnv("JWT_SECRET", "your-secret-key"),
 		AccessTokenExpiry:  accessTokenExpiry,
 		RefreshTokenExpiry: refreshTokenExpiry,
@@ -49,4 +49,3 @@ func getEnv(key, defaultValue string) string {
 	}
 	return defaultValue
 }
-

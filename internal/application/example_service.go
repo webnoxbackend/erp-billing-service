@@ -1,11 +1,11 @@
 package application
 
 import (
-	"example-service/internal/application/dto"
-	"example-service/internal/domain"
-	"example-service/internal/ports/external"
-	"example-service/internal/ports/repositories"
-	"example-service/internal/ports/services"
+	"erp-billing-service/internal/application/dto"
+	"erp-billing-service/internal/domain"
+	"erp-billing-service/internal/ports/external"
+	"erp-billing-service/internal/ports/repositories"
+	"erp-billing-service/internal/ports/services"
 	"fmt"
 	"time"
 )
