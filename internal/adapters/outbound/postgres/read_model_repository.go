@@ -2,6 +2,11 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 
 	"erp-billing-service/internal/domain"
 
@@ -43,10 +48,70 @@ func (r *ReadModelRepository) GetItem(ctx context.Context, id uuid.UUID) (*domai
 }
 
 func (r *ReadModelRepository) SearchItems(ctx context.Context, orgID uuid.UUID, query string) ([]domain.ItemRM, error) {
+	// Call the serviceandparts service API to get items
+	baseURL := "http://localhost:8087/api/v1/items"
+	params := url.Values{}
+	params.Add("organization_id", orgID.String())
+	if query != "" {
+		params.Add("search", query)
+	}
+	params.Add("limit", "20")
+
+	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call serviceandparts API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("serviceandparts API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse the response
+	var items []struct {
+		ID             string                 `json:"id"`
+		OrganizationID string                 `json:"organization_id"`
+		SKU            string                 `json:"sku"`
+		Name           string                 `json:"name"`
+		Type           string                 `json:"type"`
+		SalesInfo      map[string]interface{} `json:"sales_info"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Convert to domain.ItemRM
 	var res []domain.ItemRM
-	q := "%" + query + "%"
-	err := r.db.WithContext(ctx).Where("organization_id = ? AND (name ILIKE ? OR sku ILIKE ?)", orgID, q, q).Limit(20).Find(&res).Error
-	return res, err
+	for _, item := range items {
+		itemID, _ := uuid.Parse(item.ID)
+		orgID, _ := uuid.Parse(item.OrganizationID)
+
+		price := 0.0
+		if salesInfo, ok := item.SalesInfo["selling_price"].(float64); ok {
+			price = salesInfo
+		}
+
+		res = append(res, domain.ItemRM{
+			ID:             itemID,
+			OrganizationID: orgID,
+			SKU:            item.SKU,
+			Name:           item.Name,
+			ItemType:       item.Type,
+			Price:          price,
+		})
+	}
+
+	return res, nil
 }
 
 func (r *ReadModelRepository) GetContact(ctx context.Context, id uuid.UUID) (*domain.ContactRM, error) {
