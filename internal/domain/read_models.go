@@ -50,3 +50,49 @@ type ItemRM struct {
 	SKU            string    `json:"sku"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
+
+// WorkOrderRM represents a read-optimized version of a Work Order
+type WorkOrderRM struct {
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index" json:"organization_id"`
+	RequestID      *uuid.UUID `gorm:"type:uuid;index" json:"request_id,omitempty"`
+	EstimateID     *uuid.UUID `gorm:"type:uuid;index" json:"estimate_id,omitempty"`
+	Summary        string     `json:"summary"`
+	Priority       string     `json:"priority"`
+	Type           string     `json:"type"`
+	Status         string     `json:"status"`
+	BillingStatus  string     `json:"billing_status"`
+	CustomerID     *uuid.UUID `gorm:"type:uuid" json:"customer_id,omitempty"`
+	ContactID      *uuid.UUID `gorm:"type:uuid" json:"contact_id,omitempty"`
+	ServiceAddress string     `json:"service_address"`
+	BillingAddress string     `json:"billing_address"`
+	SubTotal       float64    `gorm:"type:decimal(15,2)" json:"sub_total"`
+	Discount       float64    `gorm:"type:decimal(15,2)" json:"discount"`
+	Adjustment     float64    `gorm:"type:decimal(15,2)" json:"adjustment"`
+	GrandTotal     float64    `gorm:"type:decimal(15,2)" json:"grand_total"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+// WorkOrderServiceLineRM represents a read-optimized version of a Work Order Service Line
+type WorkOrderServiceLineRM struct {
+	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	WorkOrderID uuid.UUID  `gorm:"type:uuid;index" json:"work_order_id"`
+	ServiceID   *uuid.UUID `gorm:"type:uuid" json:"service_id,omitempty"`
+	Description string     `json:"description"`
+	Quantity    float64    `gorm:"type:decimal(10,2)" json:"quantity"`
+	Unit        string     `json:"unit"`
+	ListPrice   float64    `gorm:"type:decimal(15,2)" json:"list_price"`
+	LineAmount  float64    `gorm:"type:decimal(15,2)" json:"line_amount"`
+}
+
+// WorkOrderPartLineRM represents a read-optimized version of a Work Order Part Line
+type WorkOrderPartLineRM struct {
+	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	WorkOrderID uuid.UUID  `gorm:"type:uuid;index" json:"work_order_id"`
+	PartID      *uuid.UUID `gorm:"type:uuid" json:"part_id,omitempty"`
+	Description string     `json:"description"`
+	Quantity    float64    `gorm:"type:decimal(10,2)" json:"quantity"`
+	Unit        string     `json:"unit"`
+	ListPrice   float64    `gorm:"type:decimal(15,2)" json:"list_price"`
+	LineAmount  float64    `gorm:"type:decimal(15,2)" json:"line_amount"`
+}

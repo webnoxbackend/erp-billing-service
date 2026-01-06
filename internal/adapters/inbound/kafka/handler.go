@@ -46,6 +46,8 @@ func (h *EventHandler) Handle(ctx context.Context, data []byte) error {
 			return h.handleServiceEvent(tx, baseEvent)
 		case shared_events.AggregatePart:
 			return h.handlePartEvent(tx, baseEvent)
+		case shared_events.AggregateWorkOrder:
+			return h.handleWorkOrderEvent(tx, baseEvent)
 		default:
 			log.Printf("Ignoring unrelated aggregate type: %s", baseEvent.Metadata.AggregateType)
 			return nil
@@ -153,4 +155,71 @@ func (h *EventHandler) handlePartEvent(tx *gorm.DB, event *shared_events.BaseEve
 	return tx.Clauses(clause.OnConflict{
 		UpdateAll: true,
 	}).Create(&rm).Error
+}
+
+func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.BaseEvent) error {
+	switch event.Metadata.EventType {
+	case shared_events.WorkOrderCreated:
+		var payload shared_events.WorkOrderCreatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		id, _ := uuid.Parse(payload.WorkOrderID)
+		orgID, _ := uuid.Parse(payload.OrganizationID)
+		custID, _ := uuid.Parse(payload.CustomerID)
+		contID, _ := uuid.Parse(payload.ContactID)
+
+		rm := domain.WorkOrderRM{
+			ID:             id,
+			OrganizationID: orgID,
+			Summary:        payload.Summary,
+			Status:         payload.Status,
+			BillingStatus:  payload.BillingStatus,
+			CustomerID:     &custID,
+			ContactID:      &contID,
+			GrandTotal:     payload.GrandTotal,
+			UpdatedAt:      event.Metadata.OccurredAt,
+		}
+
+		return tx.Clauses(clause.OnConflict{
+			UpdateAll: true,
+		}).Create(&rm).Error
+
+	case shared_events.WorkOrderUpdated:
+		var payload shared_events.WorkOrderUpdatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		id, _ := uuid.Parse(payload.WorkOrderID)
+
+		updates := make(map[string]interface{})
+		if payload.Summary != "" {
+			updates["summary"] = payload.Summary
+		}
+		if payload.Status != "" {
+			updates["status"] = payload.Status
+		}
+		if payload.BillingStatus != "" {
+			updates["billing_status"] = payload.BillingStatus
+		}
+		if payload.GrandTotal > 0 {
+			updates["grand_total"] = payload.GrandTotal
+		}
+		updates["updated_at"] = event.Metadata.OccurredAt
+
+		return tx.Model(&domain.WorkOrderRM{}).Where("id = ?", id).Updates(updates).Error
+
+	case shared_events.WorkOrderDeleted:
+		var payload shared_events.WorkOrderDeletedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+		id, _ := uuid.Parse(payload.WorkOrderID)
+		return tx.Delete(&domain.WorkOrderRM{}, "id = ?", id).Error
+
+	default:
+		return nil
+	}
 }
