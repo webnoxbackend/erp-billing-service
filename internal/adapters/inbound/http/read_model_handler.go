@@ -29,7 +29,9 @@ func (h *ReadModelHandler) SearchCustomers(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(res)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": res,
+	})
 }
 
 func (h *ReadModelHandler) SearchItems(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +46,9 @@ func (h *ReadModelHandler) SearchItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(res)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": res,
+	})
 }
 
 func (h *ReadModelHandler) SearchContacts(w http.ResponseWriter, r *http.Request) {
@@ -62,5 +66,7 @@ func (h *ReadModelHandler) SearchContacts(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(res)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": res,
+	})
 }

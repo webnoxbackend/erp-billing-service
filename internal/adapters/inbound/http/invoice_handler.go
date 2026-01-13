@@ -87,7 +87,9 @@ func (h *InvoiceHandler) ListInvoices(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(invoices)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": invoices,
+	})
 }
 
 func (h *InvoiceHandler) GetInvoice(w http.ResponseWriter, r *http.Request) {
@@ -164,5 +166,7 @@ func (h *InvoiceHandler) GetAuditLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(logs)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": logs,
+	})
 }
