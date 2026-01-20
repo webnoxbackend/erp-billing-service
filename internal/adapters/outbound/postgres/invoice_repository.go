@@ -42,6 +42,15 @@ func (r *InvoiceRepository) List(ctx context.Context, filter map[string]interfac
 	return invoices, err
 }
 
+func (r *InvoiceRepository) ListByModule(ctx context.Context, orgID uuid.UUID, sourceSystem domain.SourceSystem) ([]domain.Invoice, error) {
+	var invoices []domain.Invoice
+	err := r.db.WithContext(ctx).
+		Where("organization_id = ? AND source_system = ?", orgID, sourceSystem).
+		Order("created_at desc").
+		Find(&invoices).Error
+	return invoices, err
+}
+
 func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// First delete all invoice items

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -17,6 +18,7 @@ type InvoiceService struct {
 	rmRepo         domain.ReadModelRepository
 	auditRepo      domain.AuditLogRepository
 	eventPublisher domain.EventPublisher
+	pdfService     *PDFService // Added for PDF generation
 }
 
 func NewInvoiceService(
@@ -24,20 +26,24 @@ func NewInvoiceService(
 	rmRepo domain.ReadModelRepository,
 	auditRepo domain.AuditLogRepository,
 	eventPublisher domain.EventPublisher,
+	pdfService *PDFService,
 ) *InvoiceService {
 	return &InvoiceService{
 		invoiceRepo:    invoiceRepo,
 		rmRepo:         rmRepo,
 		auditRepo:      auditRepo,
 		eventPublisher: eventPublisher,
+		pdfService:     pdfService,
 	}
 }
 
+// CreateInvoice creates a new invoice in DRAFT status
+// Invoice number is NOT generated here - it's generated when invoice is SENT
 func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req dto.CreateInvoiceRequest) (*dto.InvoiceResponse, error) {
-	// 1. Generate Invoice Number
-	invNum, err := s.invoiceRepo.GetNextInvoiceNumber(ctx, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate invoice number: %w", err)
+	// Parse source system
+	sourceSystem := domain.SourceSystemManual
+	if req.SourceSystem != "" {
+		sourceSystem = domain.SourceSystem(req.SourceSystem)
 	}
 
 	invoiceID := uuid.New()
@@ -45,11 +51,15 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		ID:             invoiceID,
 		OrganizationID: orgID,
 		CustomerID:     req.CustomerID,
-
+		
+		// Source tracking - makes billing source-agnostic
+		SourceSystem:      sourceSystem,
+		SourceReferenceID: req.SourceReferenceID,
+		
 		ContactID:       req.ContactID,
 		OwnerID:         req.OwnerID,
 		Subject:         req.Subject,
-		InvoiceNumber:   invNum,
+		InvoiceNumber:   nil, // NOT generated on creation - only on SEND
 		ReferenceNo:     req.ReferenceNo,
 		InvoiceDate:     req.InvoiceDate,
 		DueDate:         req.DueDate,
@@ -85,20 +95,30 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 			// Fallback: If item not found in read model (e.g. sync lag),
 			// use the name provided in the request if available.
 			if itemName == "" {
-				return nil, fmt.Errorf("item %s not found and no name provided: %w", itemReq.ItemID, err)
+				// Use a generic name with ID as last resort to prevent 500
+				itemName = fmt.Sprintf("Item %s", itemReq.ItemID.String()[:8])
 			}
-			// Log warning here ideally
 		} else {
 			itemName = itemRM.Name
 		}
 
 		itemTotal := (itemReq.Quantity * itemReq.UnitPrice) - itemReq.Discount + itemReq.Tax
+		
+		// Serialize metadata to JSON
+		var metadataJSON json.RawMessage
+		if itemReq.Metadata != nil && len(itemReq.Metadata) > 0 {
+			metadataBytes, err := json.Marshal(itemReq.Metadata)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal item metadata: %w", err)
+			}
+			metadataJSON = metadataBytes
+		}
 
 		items = append(items, domain.InvoiceItem{
 			ID:          uuid.New(),
 			InvoiceID:   invoiceID,
 			ItemID:      itemReq.ItemID,
-			ItemType:    itemReq.ItemType, // Optional
+			ItemType:    itemReq.ItemType,
 			Name:        itemName,
 			Description: itemReq.Description,
 			Quantity:    itemReq.Quantity,
@@ -106,6 +126,7 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 			Discount:    itemReq.Discount,
 			Tax:         itemReq.Tax,
 			Total:       itemTotal,
+			Metadata:    metadataJSON, // Store module-specific metadata
 		})
 
 		subTotal += (itemReq.Quantity * itemReq.UnitPrice)
@@ -124,12 +145,14 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		return nil, err
 	}
 
-	// 2. Publish Event
+	// Publish InvoiceCreated event
 	s.publishInvoiceCreated(invoice)
 
 	return s.mapToResponse(ctx, invoice), nil
 }
 
+// UpdateInvoice updates an existing invoice
+// Only DRAFT invoices can be edited - enforces lifecycle rules
 func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dto.CreateInvoiceRequest) (*dto.InvoiceResponse, error) {
 	// 1. Get Existing Invoice
 	invoice, err := s.invoiceRepo.GetByID(ctx, id)
@@ -140,9 +163,13 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 		return nil, fmt.Errorf("invoice not found")
 	}
 
-	// 2. Update Fields
+	// 2. Lifecycle Validation - Only DRAFT invoices can be edited
+	if !invoice.CanEdit() {
+		return nil, fmt.Errorf("cannot edit invoice in %s status - only DRAFT invoices can be edited", invoice.Status)
+	}
+
+	// 3. Update Fields
 	invoice.Subject = req.Subject
-	// invoice.CustomerID = req.CustomerID // Usually changing customer is restricted, or complicated. Allow for now.
 	if req.ContactID != nil {
 		invoice.ContactID = req.ContactID
 	}
@@ -170,7 +197,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 	invoice.ShippingCode = req.ShippingCode
 	invoice.ShippingCountry = req.ShippingCountry
 
-	// 3. Update Items
+	// 4. Update Items
 	// Clear existing items
 	if err := s.invoiceRepo.ClearItems(ctx, invoice.ID); err != nil {
 		return nil, fmt.Errorf("failed to clear existing items: %w", err)
@@ -191,6 +218,16 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 		}
 
 		itemTotal := (itemReq.Quantity * itemReq.UnitPrice) - itemReq.Discount + itemReq.Tax
+		
+		// Serialize metadata
+		var metadataJSON json.RawMessage
+		if itemReq.Metadata != nil && len(itemReq.Metadata) > 0 {
+			metadataBytes, err := json.Marshal(itemReq.Metadata)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal item metadata: %w", err)
+			}
+			metadataJSON = metadataBytes
+		}
 
 		items = append(items, domain.InvoiceItem{
 			ID:          uuid.New(),
@@ -204,6 +241,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 			Discount:    itemReq.Discount,
 			Tax:         itemReq.Tax,
 			Total:       itemTotal,
+			Metadata:    metadataJSON,
 		})
 
 		subTotal += (itemReq.Quantity * itemReq.UnitPrice)
@@ -216,43 +254,139 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 	invoice.DiscountTotal = discountTotal
 	invoice.TaxTotal = taxTotal
 	invoice.TotalAmount = subTotal - discountTotal + taxTotal + req.Adjustment + req.ExciseDuty
-	invoice.BalanceAmount = invoice.TotalAmount // Assuming no payments yet, or simple Recalc. For partial, we need to subtract payments.
-
-	// Recalculate Balance with existing payments (if any)
-	// Currently GetByID preloads Payments.
-	paidAmount := 0.0
-	for _, p := range invoice.Payments {
-		paidAmount += p.Amount
-	}
-	invoice.PaidAmount = paidAmount
-	invoice.BalanceAmount = invoice.TotalAmount - paidAmount
+	
+	// TODO: Payment integration - Phase 2
+	// For now, balance equals total since we're not handling payments yet
+	invoice.BalanceAmount = invoice.TotalAmount
 
 	if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
 		return nil, err
 	}
 
-	// 4. Publish Event (?) - InvoiceUpdated
-	// s.publishInvoiceUpdated(invoice)
+	return s.mapToResponse(ctx, invoice), nil
+}
+
+// SendInvoice transitions an invoice from DRAFT to SENT
+// Generates invoice number and PDF on send
+func (s *InvoiceService) SendInvoice(ctx context.Context, id uuid.UUID, req dto.SendInvoiceRequest) (*dto.InvoiceResponse, error) {
+	// 1. Get existing invoice
+	invoice, err := s.invoiceRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if invoice == nil {
+		return nil, fmt.Errorf("invoice not found")
+	}
+
+	// 2. Lifecycle validation - only DRAFT invoices can be sent
+	if !invoice.CanSend() {
+		return nil, fmt.Errorf("cannot send invoice in %s status - only DRAFT invoices can be sent", invoice.Status)
+	}
+
+	// 3. Generate invoice number
+	invNum, err := s.invoiceRepo.GetNextInvoiceNumber(ctx, invoice.OrganizationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate invoice number: %w", err)
+	}
+	invoice.InvoiceNumber = &invNum
+
+	// 4. Generate PDF
+	customer, err := s.rmRepo.GetCustomer(ctx, invoice.CustomerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch customer for PDF generation: %w", err)
+	}
+
+	pdfPath, err := s.pdfService.GenerateInvoicePDF(ctx, invoice, customer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PDF: %w", err)
+	}
+	invoice.PDFPath = &pdfPath
+
+	// 5. Update status to SENT
+	if err := invoice.CanTransitionTo(domain.InvoiceStatusSent); err != nil {
+		return nil, err
+	}
+	invoice.Status = domain.InvoiceStatusSent
+
+	// 6. Save changes
+	if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
+		return nil, fmt.Errorf("failed to update invoice: %w", err)
+	}
+
+	// 7. Create audit log
+	auditLog := &domain.InvoiceAuditLog{
+		ID:             uuid.New(),
+		OrganizationID: invoice.OrganizationID,
+		InvoiceID:      invoice.ID,
+		Action:         "invoice_sent",
+		OldStatus:      string(domain.InvoiceStatusDraft),
+		NewStatus:      string(domain.InvoiceStatusSent),
+		Notes:          fmt.Sprintf("Invoice sent with number %s", invNum),
+		PerformedBy:    "System", // TODO: Get from auth context
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := s.auditRepo.Create(ctx, auditLog); err != nil {
+		// Log error but don't fail
+		fmt.Printf("failed to create audit log: %v\n", err)
+	}
+
+	// 8. Publish InvoiceSent event
+	s.publishInvoiceSent(invoice)
 
 	return s.mapToResponse(ctx, invoice), nil
 }
 
+// publishInvoiceCreated emits an event when an invoice is created
 func (s *InvoiceService) publishInvoiceCreated(inv *domain.Invoice) {
-	payload := shared_events.InvoiceCreatedPayload{
-		InvoiceID:      inv.ID.String(),
-		OrganizationID: inv.OrganizationID.String(),
-		CustomerID:     inv.CustomerID.String(),
-		Subject:        inv.Subject,
-		InvoiceNumber:  inv.InvoiceNumber,
-		InvoiceDate:    inv.InvoiceDate.Format(time.RFC3339),
-		DueDate:        inv.DueDate.Format(time.RFC3339),
-		Status:         string(inv.Status),
-		TotalAmount:    inv.TotalAmount,
-		Currency:       inv.Currency,
+	event := &domain.InvoiceCreatedEvent{
+		InvoiceID:         inv.ID.String(),
+		OrganizationID:    inv.OrganizationID.String(),
+		CustomerID:        inv.CustomerID.String(),
+		SourceSystem:      string(inv.SourceSystem),
+		SourceReferenceID: inv.SourceReferenceID,
+		Subject:           inv.Subject,
+		Status:            string(inv.Status),
+		TotalAmount:       inv.TotalAmount,
+		Currency:          inv.Currency,
+		Timestamp:         time.Now().UTC(),
 	}
 
-	metadata := shared_events.NewEventMetadata(shared_events.InvoiceCreated, shared_events.AggregateInvoice, inv.ID.String())
-	s.eventPublisher.Publish(context.Background(), metadata, payload)
+	// Create proper event metadata
+	metadata := shared_events.NewEventMetadata(
+		shared_events.EventType("billing.invoice.created"),
+		shared_events.AggregateType("invoice"),
+		inv.ID.String(),
+	)
+	s.eventPublisher.Publish(context.Background(), metadata, event)
+}
+
+// publishInvoiceSent emits an event when an invoice is sent
+func (s *InvoiceService) publishInvoiceSent(inv *domain.Invoice) {
+	invNumber := ""
+	if inv.InvoiceNumber != nil {
+		invNumber = *inv.InvoiceNumber
+	}
+
+	event := &domain.InvoiceSentEvent{
+		InvoiceID:         inv.ID.String(),
+		InvoiceNumber:     invNumber,
+		OrganizationID:    inv.OrganizationID.String(),
+		CustomerID:        inv.CustomerID.String(),
+		SourceSystem:      string(inv.SourceSystem),
+		SourceReferenceID: inv.SourceReferenceID,
+		PDFPath:           inv.PDFPath,
+		TotalAmount:       inv.TotalAmount,
+		SentAt:            time.Now().UTC(),
+		Timestamp:         time.Now().UTC(),
+	}
+
+	// Create proper event metadata
+	metadata := shared_events.NewEventMetadata(
+		shared_events.InvoiceSent,
+		shared_events.AggregateInvoice,
+		inv.ID.String(),
+	)
+	s.eventPublisher.Publish(context.Background(), metadata, event)
 }
 
 func (s *InvoiceService) GetInvoice(ctx context.Context, id uuid.UUID) (*dto.InvoiceResponse, error) {
@@ -261,6 +395,57 @@ func (s *InvoiceService) GetInvoice(ctx context.Context, id uuid.UUID) (*dto.Inv
 		return nil, err
 	}
 	return s.mapToResponse(ctx, inv), nil
+}
+
+// GetInvoicePDF returns the path to the invoice PDF, generating it if it doesn't exist but should
+func (s *InvoiceService) GetInvoicePDF(ctx context.Context, id uuid.UUID) (string, error) {
+	// 1. Get invoice
+	invoice, err := s.invoiceRepo.GetByID(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("failed to get invoice: %w", err)
+	}
+	if invoice == nil {
+		return "", fmt.Errorf("invoice not found")
+	}
+
+	// 2. PDF can be generated for any status (including DRAFT)
+	// The pdfService will handle adding the "DRAFT" watermark for draft invoices.
+
+	// 3. If PDF already exists and invoice is not draft, return existing path
+	if invoice.PDFPath != nil && *invoice.PDFPath != "" && invoice.Status != domain.InvoiceStatusDraft {
+		return *invoice.PDFPath, nil
+	}
+
+	// 4. Generate PDF (or regenerate for draft invoices)
+	// Get customer for PDF generation
+	customer, err := s.rmRepo.GetCustomer(ctx, invoice.CustomerID) // Changed from s.customerRepo.GetByID
+	if err != nil || customer == nil {
+		return "", fmt.Errorf("customer not found for invoice")
+	}
+
+	// Generate invoice number if missing (for draft invoices)
+	if invoice.InvoiceNumber == nil {
+		invNum, err := s.invoiceRepo.GetNextInvoiceNumber(ctx, invoice.OrganizationID) // Changed from s.generateInvoiceNumber(ctx)
+		if err != nil {
+			return "", fmt.Errorf("failed to generate invoice number: %w", err)
+		}
+		invoice.InvoiceNumber = &invNum
+	}
+
+	pdfPath, err := s.pdfService.GenerateInvoicePDF(ctx, invoice, customer) // Added ctx
+	if err != nil {
+		return "", fmt.Errorf("failed to generate PDF: %w", err)
+	}
+
+	// 5. Update invoice with PDF path (only for non-draft invoices)
+	if invoice.Status != domain.InvoiceStatusDraft {
+		invoice.PDFPath = &pdfPath
+		if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
+			return "", fmt.Errorf("failed to update invoice with PDF path: %w", err)
+		}
+	}
+
+	return pdfPath, nil
 }
 
 func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uuid.UUID) error {
@@ -297,10 +482,30 @@ func (s *InvoiceService) ListInvoices(ctx context.Context, orgID uuid.UUID) ([]d
 	return res, nil
 }
 
+// ListInvoicesByModule returns all invoices for an organization filtered by source system (module)
+func (s *InvoiceService) ListInvoicesByModule(ctx context.Context, orgID uuid.UUID, sourceSystem domain.SourceSystem) ([]*dto.InvoiceResponse, error) {
+	invoices, err := s.invoiceRepo.ListByModule(ctx, orgID, sourceSystem)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list invoices by module: %w", err)
+	}
+
+	responses := make([]*dto.InvoiceResponse, len(invoices))
+	for i, inv := range invoices {
+		responses[i] = s.mapToResponse(ctx, &inv)
+	}
+
+	return responses, nil
+}
+
 func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice) *dto.InvoiceResponse {
 	res := &dto.InvoiceResponse{
-		ID:              inv.ID,
-		InvoiceNumber:   inv.InvoiceNumber,
+		ID:            inv.ID,
+		InvoiceNumber: inv.InvoiceNumber,
+		
+		// Source tracking
+		SourceSystem:      string(inv.SourceSystem),
+		SourceReferenceID: inv.SourceReferenceID,
+		
 		Subject:         inv.Subject,
 		Status:          string(inv.Status),
 		SubTotal:        inv.SubTotal,
@@ -319,6 +524,10 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 		ContactID:       inv.ContactID,
 		InvoiceDate:     inv.InvoiceDate,
 		DueDate:         inv.DueDate,
+		
+		// PDF path
+		PDFPath: inv.PDFPath,
+		
 		BillingStreet:   inv.BillingStreet,
 		BillingCity:     inv.BillingCity,
 		BillingState:    inv.BillingState,
@@ -357,7 +566,7 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 	if len(inv.Items) > 0 {
 		res.Items = make([]dto.ItemResponse, 0, len(inv.Items))
 		for _, item := range inv.Items {
-			res.Items = append(res.Items, dto.ItemResponse{
+			itemResp := dto.ItemResponse{
 				ItemID:      item.ItemID,
 				ItemType:    item.ItemType,
 				Name:        item.Name,
@@ -367,7 +576,17 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 				Discount:    item.Discount,
 				Tax:         item.Tax,
 				Total:       item.Total,
-			})
+			}
+			
+			// Deserialize metadata if present
+			if len(item.Metadata) > 0 {
+				var metadata map[string]interface{}
+				if err := json.Unmarshal(item.Metadata, &metadata); err == nil {
+					itemResp.Metadata = metadata
+				}
+			}
+			
+			res.Items = append(res.Items, itemResp)
 		}
 	}
 

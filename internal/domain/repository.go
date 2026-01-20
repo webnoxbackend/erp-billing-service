@@ -11,6 +11,7 @@ type InvoiceRepository interface {
 	Update(ctx context.Context, invoice *Invoice) error
 	GetByID(ctx context.Context, id uuid.UUID) (*Invoice, error)
 	List(ctx context.Context, filter map[string]interface{}) ([]Invoice, error)
+	ListByModule(ctx context.Context, orgID uuid.UUID, sourceSystem SourceSystem) ([]Invoice, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetNextInvoiceNumber(ctx context.Context, orgID uuid.UUID) (string, error)
 	ClearItems(ctx context.Context, invoiceID uuid.UUID) error
@@ -18,7 +19,11 @@ type InvoiceRepository interface {
 
 type PaymentRepository interface {
 	Create(ctx context.Context, payment *Payment) error
+	Update(ctx context.Context, payment *Payment) error
+	GetByID(ctx context.Context, id uuid.UUID) (*Payment, error)
 	GetByInvoiceID(ctx context.Context, invoiceID uuid.UUID) ([]Payment, error)
+	ListByInvoice(ctx context.Context, invoiceID uuid.UUID) ([]Payment, error)
+	List(ctx context.Context) ([]Payment, error)
 }
 
 type ReadModelRepository interface {

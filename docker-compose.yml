@@ -1,58 +1,34 @@
-version: '3.8'
+version: "3.8"
 
 services:
+  erp-billing-service:
+    build: .
+    container_name: erp-billing-service
+    ports:
+      - "8088:8088"
+      - "50088:50051"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=billing_db
+      - SERVER_PORT=8088
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - postgres
+
   postgres:
     image: postgres:15-alpine
-    container_name: example-postgres
+    container_name: billing-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: example_db
+      POSTGRES_DB: billing_db
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: example-redis
-    ports:
-      - "6380:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  example-service:
-    build: .
-    container_name: example-service
-    ports:
-      - "50051:50051"
-      - "8081:8081"
-    environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/example_db?sslmode=disable
-      REDIS_URL: redis:6379
-      GRPC_PORT: 50051
-      HTTP_PORT: 8081
-      JWT_SECRET: your-secret-key-change-in-production
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./:/app
-    command: go run ./cmd/api/main.go
 
 volumes:
   postgres_data:
-  redis_data:
-

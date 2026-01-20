@@ -54,10 +54,16 @@ func main() {
 	rmRepo := postgres.NewReadModelRepository(db)
 	eventPublisher := kafka_outbound.NewEventPublisher(producer)
 
+	// 5.5. Initialize PDF Service
+	pdfStoragePath := os.Getenv("PDF_STORAGE_PATH")
+	if pdfStoragePath == "" {
+		pdfStoragePath = "/var/billing/pdfs" // Default path
+	}
+	pdfService := application.NewPDFService(pdfStoragePath)
+
 	// 6. Initialize Services
-	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher)
-	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, eventPublisher)
-	_ = paymentService // Reserved for future payment endpoints
+	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService)
+	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, auditRepo, eventPublisher)
 
 	// 7. Initialize Kafka Consumers
 	eventHandler := kafka.NewEventHandler(db)
@@ -71,6 +77,7 @@ func main() {
 
 	// 8. Initialize HTTP Handlers
 	invoiceHandler := billing_http.NewInvoiceHandler(invoiceService)
+	paymentHandler := billing_http.NewPaymentHandler(paymentService)
 	rmHandler := billing_http.NewReadModelHandler(rmRepo)
 
 	router := mux.NewRouter()
@@ -84,6 +91,18 @@ func main() {
 	api.HandleFunc("/billing/invoices/{id}", invoiceHandler.DeleteInvoice).Methods("DELETE")
 	api.HandleFunc("/billing/invoices/{id}/status", invoiceHandler.UpdateStatus).Methods("PATCH")
 	api.HandleFunc("/billing/invoices/{id}/audit-logs", invoiceHandler.GetAuditLogs).Methods("GET")
+	
+	// New Invoice Workflow Routes
+	api.HandleFunc("/billing/invoices/{id}/send", invoiceHandler.SendInvoice).Methods("POST")
+	api.HandleFunc("/billing/invoices/{id}/pdf", invoiceHandler.DownloadInvoicePDF).Methods("GET")
+	api.HandleFunc("/billing/invoices/{id}/preview", invoiceHandler.PreviewInvoicePDF).Methods("GET")
+
+	// Payment Routes
+	api.HandleFunc("/billing/payments", paymentHandler.ListPayments).Methods("GET")
+	api.HandleFunc("/billing/payments", paymentHandler.RecordPayment).Methods("POST")
+	api.HandleFunc("/billing/payments/{id}", paymentHandler.GetPayment).Methods("GET")
+	api.HandleFunc("/billing/payments/{id}/void", paymentHandler.VoidPayment).Methods("POST")
+	api.HandleFunc("/billing/invoices/{id}/payments", paymentHandler.ListPaymentsByInvoice).Methods("GET")
 
 	// Read Model Search Routes (for UI Autocomplete)
 	api.HandleFunc("/billing/search/customers", rmHandler.SearchCustomers).Methods("GET")
