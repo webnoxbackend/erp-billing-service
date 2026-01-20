@@ -32,9 +32,6 @@ WORKDIR /root/
 # Copy the binary from builder
 COPY --from=builder /app/erp-billing-service/billing-service .
 
-# Copy migrations if needed
-COPY --from=builder /app/erp-billing-service/migrations ./migrations
-
 # Expose ports
 EXPOSE 8088 50051
 
