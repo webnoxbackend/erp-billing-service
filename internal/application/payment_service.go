@@ -7,6 +7,7 @@ import (
 
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
+	"erp-billing-service/internal/ports/repositories"
 
 	shared_events "github.com/efs/shared-events"
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 type PaymentService struct {
 	paymentRepo    domain.PaymentRepository
 	invoiceRepo    domain.InvoiceRepository
+	salesOrderRepo repositories.SalesOrderRepository
 	auditRepo      domain.AuditLogRepository
 	eventPublisher domain.EventPublisher
 }
@@ -24,12 +26,14 @@ type PaymentService struct {
 func NewPaymentService(
 	paymentRepo domain.PaymentRepository,
 	invoiceRepo domain.InvoiceRepository,
+	salesOrderRepo repositories.SalesOrderRepository,
 	auditRepo domain.AuditLogRepository,
 	eventPublisher domain.EventPublisher,
 ) *PaymentService {
 	return &PaymentService{
 		paymentRepo:    paymentRepo,
 		invoiceRepo:    invoiceRepo,
+		salesOrderRepo: salesOrderRepo,
 		auditRepo:      auditRepo,
 		eventPublisher: eventPublisher,
 	}
@@ -121,6 +125,12 @@ func (s *PaymentService) RecordPayment(ctx context.Context, req dto.RecordPaymen
 	// Only publish invoice paid event when fully paid
 	if invoice.Status == domain.InvoiceStatusPaid {
 		s.publishInvoicePaid(invoice)
+
+		// Direct update for Sales Order if linked (Inventory/Internal)
+		if invoice.SalesOrderID != nil {
+			// We update status to paid directly
+			s.salesOrderRepo.UpdateStatus(ctx, *invoice.SalesOrderID, domain.SalesOrderStatusPaid)
+		}
 	}
 
 	return s.mapToResponse(payment), nil

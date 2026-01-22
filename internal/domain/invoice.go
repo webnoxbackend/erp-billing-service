@@ -66,6 +66,13 @@ type Invoice struct {
 	// PDF path - populated when invoice is sent
 	PDFPath         *string       `gorm:"type:varchar(500)" json:"pdf_path"`
 	
+	// Sales Order reference - populated when invoice is created from sales order
+	SalesOrderID    *uuid.UUID    `gorm:"type:uuid;index" json:"sales_order_id"`
+	
+	// TDS/TCS amounts
+	TDSAmount       float64       `gorm:"type:decimal(15,2);default:0" json:"tds_amount"`
+	TCSAmount       float64       `gorm:"type:decimal(15,2);default:0" json:"tcs_amount"`
+	
 	BillingStreet   string        `gorm:"type:varchar(255)" json:"billing_street"`
 	BillingCity     string        `gorm:"type:varchar(100)" json:"billing_city"`
 	BillingState    string        `gorm:"type:varchar(100)" json:"billing_state"`
@@ -124,6 +131,12 @@ func (i *Invoice) CanReceivePayment() bool {
 	return i.Status == InvoiceStatusSent
 }
 
+// CanRefund returns true if the invoice can be refunded
+// Only PAID invoices can be refunded
+func (i *Invoice) CanRefund() bool {
+	return i.Status == InvoiceStatusPaid
+}
+
 // CalculateStatus derives the invoice status based on payment amounts
 // This ensures invoice status is always consistent with payment state
 func (i *Invoice) CalculateStatus() InvoiceStatus {
@@ -171,10 +184,20 @@ type Payment struct {
 	Method         PaymentMethod `gorm:"type:varchar(50);column:payment_method" json:"method"`
 	Reference      string        `gorm:"type:varchar(100);column:transaction_ref" json:"reference"`
 	Status         PaymentStatus `gorm:"type:varchar(20);default:'completed'" json:"status"`
+	PaymentType    PaymentType   `gorm:"type:varchar(20);default:'payment'" json:"payment_type"`
+	SalesReturnID  *uuid.UUID    `gorm:"type:uuid;index" json:"sales_return_id"`
 	Notes          string        `gorm:"type:text" json:"notes"`
 	CreatedAt      time.Time     `json:"created_at"`
 	UpdatedAt      time.Time     `json:"updated_at"`
 }
+
+// PaymentType represents the type of payment
+type PaymentType string
+
+const (
+	PaymentTypePayment PaymentType = "payment"
+	PaymentTypeRefund  PaymentType = "refund"
+)
 
 // PaymentMethod represents the payment method
 type PaymentMethod string

@@ -76,6 +76,7 @@ type PaymentRecordedEvent struct {
 	OrganizationID    string    `json:"organization_id"`
 	Amount            float64   `json:"amount"`
 	Method            string    `json:"method"`
+	PaymentType       string    `json:"payment_type"` // "payment" or "refund"
 	PaymentDate       time.Time `json:"payment_date"`
 	InvoiceTotal      float64   `json:"invoice_total"`
 	TotalPaid         float64   `json:"total_paid"`
@@ -106,3 +107,81 @@ type InvoicePaidEvent struct {
 	TotalAmount       float64   `json:"total_amount"`
 	Timestamp         time.Time `json:"timestamp"`
 }
+
+// BaseEvent provides common fields for all events
+type BaseEvent struct {
+	EventID        string    `json:"event_id"`
+	EventType      string    `json:"event_type"`
+	AggregateID    string    `json:"aggregate_id"`
+	AggregateType  string    `json:"aggregate_type"`
+	OrganizationID string    `json:"organization_id"`
+	Timestamp      time.Time `json:"timestamp"`
+}
+
+// ============================================================================
+// Sales Order Events
+// ============================================================================
+
+// SalesOrderCreatedEvent represents a sales order creation event
+type SalesOrderCreatedEvent struct {
+	SalesOrderID string   `json:"sales_order_id"`
+	OrderNumber  *string  `json:"order_number,omitempty"`
+	CustomerID   string   `json:"customer_id"`
+	TotalAmount  float64  `json:"total_amount"`
+	Status       string   `json:"status"`
+}
+
+// SalesOrderUpdatedEvent represents a sales order update event
+type SalesOrderUpdatedEvent struct {
+	SalesOrderID string `json:"sales_order_id"`
+}
+
+// SalesOrderConfirmedEvent represents a sales order confirmation event
+type SalesOrderConfirmedEvent struct {
+	SalesOrderID string `json:"sales_order_id"`
+	OrderNumber  string `json:"order_number"`
+}
+
+// SalesOrderInvoicedEvent represents a sales order being invoiced
+type SalesOrderInvoicedEvent struct {
+	SalesOrderID string `json:"sales_order_id"`
+	InvoiceID    string `json:"invoice_id"`
+}
+
+// SalesOrderShippedEvent represents a sales order being shipped
+type SalesOrderShippedEvent struct {
+	SalesOrderID string    `json:"sales_order_id"`
+	ShippedDate  time.Time `json:"shipped_date"`
+}
+
+// SalesOrderCancelledEvent represents a sales order cancellation
+type SalesOrderCancelledEvent struct {
+	SalesOrderID string `json:"sales_order_id"`
+	Reason       string `json:"reason"`
+}
+
+// ============================================================================
+// Sales Return Events
+// ============================================================================
+
+// SalesReturnCreatedEvent represents a sales return creation event
+type SalesReturnCreatedEvent struct {
+	SalesReturnID string  `json:"sales_return_id"`
+	ReturnNumber  string  `json:"return_number"`
+	SalesOrderID  string  `json:"sales_order_id"`
+	ReturnAmount  float64 `json:"return_amount"`
+}
+
+// SalesReturnReceivedEvent represents a sales return being received
+type SalesReturnReceivedEvent struct {
+	SalesReturnID string    `json:"sales_return_id"`
+	ReceivedDate  time.Time `json:"received_date"`
+}
+
+// SalesReturnRefundedEvent represents a sales return being refunded
+type SalesReturnRefundedEvent struct {
+	SalesReturnID string  `json:"sales_return_id"`
+	RefundAmount  float64 `json:"refund_amount"`
+	PaymentID     string  `json:"payment_id"`
+}
+

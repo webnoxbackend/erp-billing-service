@@ -52,6 +52,8 @@ func main() {
 	paymentRepo := postgres.NewPaymentRepository(db)
 	auditRepo := postgres.NewAuditLogRepository(db)
 	rmRepo := postgres.NewReadModelRepository(db)
+	salesOrderRepo := postgres.NewSalesOrderRepository(db)
+	salesReturnRepo := postgres.NewSalesReturnRepository(db)
 	eventPublisher := kafka_outbound.NewEventPublisher(producer)
 
 	// 5.5. Initialize PDF Service
@@ -63,7 +65,9 @@ func main() {
 
 	// 6. Initialize Services
 	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService)
-	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, auditRepo, eventPublisher)
+	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, salesOrderRepo, auditRepo, eventPublisher)
+	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, eventPublisher)
+	salesReturnService := application.NewSalesReturnService(salesReturnRepo, salesOrderRepo, invoiceRepo, paymentRepo, eventPublisher)
 
 	// 7. Initialize Kafka Consumers
 	eventHandler := kafka.NewEventHandler(db)
@@ -78,6 +82,8 @@ func main() {
 	// 8. Initialize HTTP Handlers
 	invoiceHandler := billing_http.NewInvoiceHandler(invoiceService)
 	paymentHandler := billing_http.NewPaymentHandler(paymentService)
+	salesOrderHandler := billing_http.NewSalesOrderHandler(salesOrderService)
+	salesReturnHandler := billing_http.NewSalesReturnHandler(salesReturnService)
 	rmHandler := billing_http.NewReadModelHandler(rmRepo)
 
 	router := mux.NewRouter()
@@ -108,6 +114,24 @@ func main() {
 	api.HandleFunc("/billing/search/customers", rmHandler.SearchCustomers).Methods("GET")
 	api.HandleFunc("/billing/search/items", rmHandler.SearchItems).Methods("GET")
 	api.HandleFunc("/billing/search/contacts", rmHandler.SearchContacts).Methods("GET")
+
+	// Sales Order Routes
+	api.HandleFunc("/billing/sales-orders", salesOrderHandler.CreateSalesOrder).Methods("POST")
+	api.HandleFunc("/billing/sales-orders", salesOrderHandler.ListSalesOrders).Methods("GET")
+	api.HandleFunc("/billing/sales-orders/{id}", salesOrderHandler.GetSalesOrder).Methods("GET")
+	api.HandleFunc("/billing/sales-orders/{id}", salesOrderHandler.UpdateSalesOrder).Methods("PUT")
+	api.HandleFunc("/billing/sales-orders/{id}/confirm", salesOrderHandler.ConfirmSalesOrder).Methods("POST")
+	api.HandleFunc("/billing/sales-orders/{id}/create-invoice", salesOrderHandler.CreateInvoiceFromOrder).Methods("POST")
+	api.HandleFunc("/billing/sales-orders/{id}/ship", salesOrderHandler.MarkAsShipped).Methods("POST")
+	api.HandleFunc("/billing/sales-orders/{id}/cancel", salesOrderHandler.CancelSalesOrder).Methods("DELETE")
+
+	// Sales Return Routes
+	api.HandleFunc("/billing/sales-returns", salesReturnHandler.CreateSalesReturn).Methods("POST")
+	api.HandleFunc("/billing/sales-returns", salesReturnHandler.ListSalesReturns).Methods("GET")
+	api.HandleFunc("/billing/sales-returns/{id}", salesReturnHandler.GetSalesReturn).Methods("GET")
+	api.HandleFunc("/billing/sales-orders/{id}/returns", salesReturnHandler.GetReturnsBySalesOrder).Methods("GET")
+	api.HandleFunc("/billing/sales-returns/{id}/receive", salesReturnHandler.ReceiveReturn).Methods("POST")
+	api.HandleFunc("/billing/sales-returns/{id}/refund", salesReturnHandler.ProcessRefund).Methods("POST")
 
 	// Health check
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
