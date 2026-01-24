@@ -51,3 +51,18 @@ func (r *PaymentRepository) List(ctx context.Context) ([]domain.Payment, error) 
 	err := r.db.WithContext(ctx).Order("payment_date desc").Find(&payments).Error
 	return payments, err
 }
+
+// ListByModule returns payments filtered by invoice source_system
+func (r *PaymentRepository) ListByModule(ctx context.Context, orgID uuid.UUID, sourceSystem domain.SourceSystem) ([]domain.Payment, error) {
+	var payments []domain.Payment
+	
+	// Join with invoices table to filter by source_system
+	err := r.db.WithContext(ctx).
+		Joins("JOIN invoices ON invoices.id = payments.invoice_id").
+		Where("payments.organization_id = ? AND invoices.source_system = ?", orgID, sourceSystem).
+		Order("payments.payment_date desc").
+		Find(&payments).Error
+	
+	return payments, err
+}
+

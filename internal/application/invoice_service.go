@@ -148,8 +148,84 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 	// Publish InvoiceCreated event
 	s.publishInvoiceCreated(invoice)
 
+
 	return s.mapToResponse(ctx, invoice), nil
 }
+
+// CreateInvoiceFromEstimate creates an invoice from a CRM estimate
+func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uuid.UUID, req dto.CreateInvoiceFromEstimateRequest) (*dto.InvoiceResponse, error) {
+	invoiceID := uuid.New()
+	
+	// Create invoice with CRM source system
+	invoice := &domain.Invoice{
+		ID:                invoiceID,
+		OrganizationID:    orgID,
+		CustomerID:        req.CustomerID,
+		ContactID:         req.ContactID,
+		Subject:           req.Subject,
+		InvoiceNumber:     nil, // Generated on send
+		SourceSystem:      domain.SourceSystemCRM,
+		SourceReferenceID: &req.EstimateID, // Link back to estimate
+		InvoiceDate:       req.InvoiceDate,
+		DueDate:           req.DueDate,
+		Status:            domain.InvoiceStatusDraft,
+		Currency:          req.Currency,
+		Adjustment:        req.Adjustment,
+		Terms:             req.Terms,
+		Notes:             req.Notes,
+		BillingStreet:     req.BillingStreet,
+		BillingCity:       req.BillingCity,
+		BillingState:      req.BillingState,
+		BillingCode:       req.BillingCode,
+		BillingCountry:    req.BillingCountry,
+		ShippingStreet:    req.ShippingStreet,
+		ShippingCity:      req.ShippingCity,
+		ShippingState:     req.ShippingState,
+		ShippingCode:      req.ShippingCode,
+		ShippingCountry:   req.ShippingCountry,
+	}
+
+	// Convert estimate items to invoice items
+	var items []domain.InvoiceItem
+	var subTotal, discountTotal, taxTotal float64
+
+	for _, itemReq := range req.Items {
+		itemTotal := (itemReq.Quantity * itemReq.UnitPrice) - itemReq.Discount + itemReq.Tax
+
+		items = append(items, domain.InvoiceItem{
+			ID:          uuid.New(),
+			InvoiceID:   invoiceID,
+			Name:        itemReq.Description,
+			Description: itemReq.Description,
+			Quantity:    itemReq.Quantity,
+			UnitPrice:   itemReq.UnitPrice,
+			Discount:    itemReq.Discount,
+			Tax:         itemReq.Tax,
+			Total:       itemTotal,
+		})
+
+		subTotal += (itemReq.Quantity * itemReq.UnitPrice)
+		discountTotal += itemReq.Discount
+		taxTotal += itemReq.Tax
+	}
+
+	invoice.Items = items
+	invoice.SubTotal = subTotal
+	invoice.DiscountTotal = discountTotal
+	invoice.TaxTotal = taxTotal
+	invoice.TotalAmount = subTotal - discountTotal + taxTotal + req.Adjustment
+	invoice.BalanceAmount = invoice.TotalAmount
+
+	if err := s.invoiceRepo.Create(ctx, invoice); err != nil {
+		return nil, fmt.Errorf("failed to create invoice from estimate: %w", err)
+	}
+
+	// Publish InvoiceCreated event
+	s.publishInvoiceCreated(invoice)
+
+	return s.mapToResponse(ctx, invoice), nil
+}
+
 
 // UpdateInvoice updates an existing invoice
 // Only DRAFT invoices can be edited - enforces lifecycle rules

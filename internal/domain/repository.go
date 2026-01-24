@@ -24,6 +24,7 @@ type PaymentRepository interface {
 	GetByInvoiceID(ctx context.Context, invoiceID uuid.UUID) ([]Payment, error)
 	ListByInvoice(ctx context.Context, invoiceID uuid.UUID) ([]Payment, error)
 	List(ctx context.Context) ([]Payment, error)
+	ListByModule(ctx context.Context, orgID uuid.UUID, sourceSystem SourceSystem) ([]Payment, error)
 }
 
 type ReadModelRepository interface {

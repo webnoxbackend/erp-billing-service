@@ -85,6 +85,7 @@ func main() {
 	salesOrderHandler := billing_http.NewSalesOrderHandler(salesOrderService)
 	salesReturnHandler := billing_http.NewSalesReturnHandler(salesReturnService)
 	rmHandler := billing_http.NewReadModelHandler(rmRepo)
+	estimateInvoiceHandler := billing_http.NewEstimateInvoiceHandler(invoiceService)
 
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api/v1").Subrouter()
@@ -102,6 +103,9 @@ func main() {
 	api.HandleFunc("/billing/invoices/{id}/send", invoiceHandler.SendInvoice).Methods("POST")
 	api.HandleFunc("/billing/invoices/{id}/pdf", invoiceHandler.DownloadInvoicePDF).Methods("GET")
 	api.HandleFunc("/billing/invoices/{id}/preview", invoiceHandler.PreviewInvoicePDF).Methods("GET")
+	
+	// Estimate to Invoice Conversion Route
+	api.HandleFunc("/billing/estimates/{id}/invoice", estimateInvoiceHandler.CreateInvoiceFromEstimate).Methods("POST")
 
 	// Payment Routes
 	api.HandleFunc("/billing/payments", paymentHandler.ListPayments).Methods("GET")

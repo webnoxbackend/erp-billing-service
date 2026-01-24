@@ -6,6 +6,7 @@ import (
 
 	"erp-billing-service/internal/application"
 	"erp-billing-service/internal/application/dto"
+	"erp-billing-service/internal/domain"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -63,7 +64,38 @@ func (h *PaymentHandler) VoidPayment(w http.ResponseWriter, r *http.Request) {
 
 // ListPayments handles GET /api/v1/billing/payments
 func (h *PaymentHandler) ListPayments(w http.ResponseWriter, r *http.Request) {
-	payments, err := h.service.ListAllPayments(r.Context())
+	orgIDStr := r.Header.Get("X-Organization-ID")
+	orgID, _ := uuid.Parse(orgIDStr)
+	
+	// Get module filter from query params (optional)
+	moduleFilter := r.URL.Query().Get("module")
+	
+	var err error
+	var result interface{}
+	
+	if moduleFilter != "" {
+		// Filter by specific module (FSM, CRM, INVENTORY)
+		var sourceSystem domain.SourceSystem
+		switch moduleFilter {
+		case "FSM":
+			sourceSystem = domain.SourceSystemFSM
+		case "CRM":
+			sourceSystem = domain.SourceSystemCRM
+		case "INVENTORY", "IMS":
+			sourceSystem = domain.SourceSystemInventory
+		default:
+			// Invalid module, return all
+			result, err = h.service.ListAllPayments(r.Context())
+		}
+		
+		if sourceSystem != "" {
+			result, err = h.service.ListPaymentsByModule(r.Context(), orgID, sourceSystem)
+		}
+	} else {
+		// No filter, return all payments
+		result, err = h.service.ListAllPayments(r.Context())
+	}
+	
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -71,7 +103,7 @@ func (h *PaymentHandler) ListPayments(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"data": payments,
+		"data": result,
 	})
 }
 

@@ -151,6 +151,21 @@ func (s *PaymentService) ListAllPayments(ctx context.Context) ([]*dto.PaymentRes
 	return responses, nil
 }
 
+// ListPaymentsByModule returns payments filtered by invoice source_system
+func (s *PaymentService) ListPaymentsByModule(ctx context.Context, orgID uuid.UUID, sourceSystem domain.SourceSystem) ([]*dto.PaymentResponse, error) {
+	payments, err := s.paymentRepo.ListByModule(ctx, orgID, sourceSystem)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list payments by module: %w", err)
+	}
+
+	responses := make([]*dto.PaymentResponse, len(payments))
+	for i, payment := range payments {
+		responses[i] = s.mapToResponse(&payment)
+	}
+
+	return responses, nil
+}
+
 // VoidPayment voids an existing payment
 func (s *PaymentService) VoidPayment(ctx context.Context, paymentID uuid.UUID, notes string) error {
 	// 1. Get payment
