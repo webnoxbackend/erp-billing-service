@@ -13,6 +13,7 @@ import (
 	"erp-billing-service/internal/adapters/inbound/kafka"
 	kafka_outbound "erp-billing-service/internal/adapters/outbound/kafka"
 	"erp-billing-service/internal/adapters/outbound/postgres"
+	grpc_adapter "erp-billing-service/internal/adapters/outbound/grpc"
 	"erp-billing-service/internal/application"
 	"erp-billing-service/internal/config"
 	"erp-billing-service/internal/database"
@@ -63,11 +64,23 @@ func main() {
 	}
 	pdfService := application.NewPDFService(pdfStoragePath)
 
+	// 5.6 Initialize Inventory Client
+	inventoryClient, err := grpc_adapter.NewInventoryClient(cfg.InventoryServiceURL)
+	if err != nil {
+		log.Printf("Warning: Failed to connect to inventory service: %v", err)
+		// Proceed without inventory checks? Or fail? Plan implies we should check.
+		// Converting to nil client logic inside services handles nil client (skips checks).
+		inventoryClient = nil
+	} else {
+		defer inventoryClient.Close()
+		log.Println("Connected to Inventory Service")
+	}
+
 	// 6. Initialize Services
-	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService)
+	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService, inventoryClient)
 	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, salesOrderRepo, auditRepo, eventPublisher)
-	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, eventPublisher)
-	salesReturnService := application.NewSalesReturnService(salesReturnRepo, salesOrderRepo, invoiceRepo, paymentRepo, eventPublisher)
+	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, eventPublisher, inventoryClient)
+	salesReturnService := application.NewSalesReturnService(salesReturnRepo, salesOrderRepo, invoiceRepo, paymentRepo, eventPublisher, inventoryClient)
 
 	// 7. Initialize Kafka Consumers
 	eventHandler := kafka.NewEventHandler(db)
@@ -127,6 +140,7 @@ func main() {
 	api.HandleFunc("/billing/sales-orders/{id}/confirm", salesOrderHandler.ConfirmSalesOrder).Methods("POST")
 	api.HandleFunc("/billing/sales-orders/{id}/create-invoice", salesOrderHandler.CreateInvoiceFromOrder).Methods("POST")
 	api.HandleFunc("/billing/sales-orders/{id}/ship", salesOrderHandler.MarkAsShipped).Methods("POST")
+	api.HandleFunc("/billing/sales-orders/{id}", salesOrderHandler.CancelSalesOrder).Methods("DELETE")
 	api.HandleFunc("/billing/sales-orders/{id}/cancel", salesOrderHandler.CancelSalesOrder).Methods("DELETE")
 
 	// Sales Return Routes

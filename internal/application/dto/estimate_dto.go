@@ -42,6 +42,7 @@ type CreateInvoiceFromEstimateRequest struct {
 
 // EstimateItemDTO represents a line item from an estimate
 type EstimateItemDTO struct {
+	ItemID      string  `json:"item_id"`
 	Description string  `json:"description"`
 	Quantity    float64 `json:"quantity"`
 	UnitPrice   float64 `json:"unit_price"`

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
+	"erp-billing-service/internal/ports/outbound"
 	"erp-billing-service/internal/ports/repositories"
 	shared_events "github.com/efs/shared-events"
 )
@@ -17,6 +18,7 @@ type SalesOrderService struct {
 	salesOrderRepo repositories.SalesOrderRepository
 	invoiceRepo    domain.InvoiceRepository
 	eventPublisher domain.EventPublisher
+	inventoryClient outbound.InventoryClient
 }
 
 // NewSalesOrderService creates a new sales order service
@@ -24,16 +26,49 @@ func NewSalesOrderService(
 	salesOrderRepo repositories.SalesOrderRepository,
 	invoiceRepo domain.InvoiceRepository,
 	eventPublisher domain.EventPublisher,
+	inventoryClient outbound.InventoryClient,
 ) *SalesOrderService {
 	return &SalesOrderService{
 		salesOrderRepo: salesOrderRepo,
 		invoiceRepo:    invoiceRepo,
 		eventPublisher: eventPublisher,
+		inventoryClient: inventoryClient,
 	}
 }
 
 // CreateSalesOrder creates a new sales order in draft status
 func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (*dto.SalesOrderResponse, error) {
+	// Check stock availability if inventory client is available
+	if s.inventoryClient != nil {
+		stockItems := make([]outbound.StockCheckItem, 0)
+		for _, itemDTO := range req.Items {
+			// Only check stock for GOODS items, assuming 'goods' type or if type is empty default to goods?
+			// The ItemType isn't strictly defined here as enum, but let's assume we check everything for now or filter.
+			// Ideally we check everything.
+			stockItems = append(stockItems, outbound.StockCheckItem{
+				ItemID:   itemDTO.ItemID.String(),
+				Quantity: int32(itemDTO.Quantity),
+			})
+		}
+
+		if len(stockItems) > 0 {
+			unavailable, err := s.inventoryClient.CheckStockAvailability(context.Background(), stockItems)
+			if err != nil {
+				// Log error but maybe don't block if critical?
+				// Plan says "Fail if unavailable".
+				return nil, fmt.Errorf("failed to check stock availability: %w", err)
+			}
+			if len(unavailable) > 0 {
+				// Construct error message with unavailable items
+				errMsg := "stock unavailable for items: "
+				for _, u := range unavailable {
+					errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
+				}
+				return nil, fmt.Errorf(errMsg)
+			}
+		}
+	}
+
 	// Create sales order entity
 	salesOrder := &domain.SalesOrder{
 		ID:             uuid.New(),
@@ -82,6 +117,31 @@ func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (
 	// Save to database
 	if err := s.salesOrderRepo.Create(salesOrder); err != nil {
 		return nil, fmt.Errorf("failed to create sales order: %w", err)
+	}
+
+	// Update stock (Decrease)
+	if s.inventoryClient != nil {
+		stockItems := make([]outbound.StockCheckItem, 0)
+		for _, item := range salesOrder.Items {
+			stockItems = append(stockItems, outbound.StockCheckItem{
+				ItemID:   item.ItemID.String(),
+				Quantity: int32(item.Quantity),
+			})
+		}
+		if len(stockItems) > 0 {
+			// We use background context or pass context from request if available. 
+			// CreateSalesOrder doesn't take context in current signature (bad practice but following existing code).
+			// We'll use background.
+			// TransactionType: 'sales', ReferenceType: 'sales_order'
+			err := s.inventoryClient.UpdateStock(context.Background(), stockItems, "sales", "sales_order", salesOrder.ID.String(), "Sales Order Created")
+			if err != nil {
+				// If stock update fails, we might want to log it or alert.
+				// Since we already saved the order, we shouldn't fail the request entirely, 
+				// BUT consistency is broken.
+				// For now, let's log and return error warning, or just return error.
+				return nil, fmt.Errorf("sales order created but failed to update stock: %w", err)
+			}
+		}
 	}
 
 	// Publish event

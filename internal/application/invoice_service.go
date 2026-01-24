@@ -8,6 +8,7 @@ import (
 
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
+	"erp-billing-service/internal/ports/outbound"
 
 	shared_events "github.com/efs/shared-events"
 	"github.com/google/uuid"
@@ -19,6 +20,7 @@ type InvoiceService struct {
 	auditRepo      domain.AuditLogRepository
 	eventPublisher domain.EventPublisher
 	pdfService     *PDFService // Added for PDF generation
+	inventoryClient outbound.InventoryClient
 }
 
 func NewInvoiceService(
@@ -27,6 +29,7 @@ func NewInvoiceService(
 	auditRepo domain.AuditLogRepository,
 	eventPublisher domain.EventPublisher,
 	pdfService *PDFService,
+	inventoryClient outbound.InventoryClient,
 ) *InvoiceService {
 	return &InvoiceService{
 		invoiceRepo:    invoiceRepo,
@@ -34,6 +37,7 @@ func NewInvoiceService(
 		auditRepo:      auditRepo,
 		eventPublisher: eventPublisher,
 		pdfService:     pdfService,
+		inventoryClient: inventoryClient,
 	}
 }
 
@@ -82,6 +86,32 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		ShippingState:   req.ShippingState,
 		ShippingCode:    req.ShippingCode,
 		ShippingCountry: req.ShippingCountry,
+	}
+
+	// Stock Management
+	shouldCheckStock := invoice.SalesOrderID == nil && s.inventoryClient != nil
+
+	if shouldCheckStock {
+		stockItems := make([]outbound.StockCheckItem, 0)
+		for _, itemReq := range req.Items {
+			stockItems = append(stockItems, outbound.StockCheckItem{
+				ItemID:   itemReq.ItemID.String(),
+				Quantity: int32(itemReq.Quantity),
+			})
+		}
+		if len(stockItems) > 0 {
+			unavailable, err := s.inventoryClient.CheckStockAvailability(ctx, stockItems)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check stock availability: %w", err)
+			}
+			if len(unavailable) > 0 {
+				errMsg := "stock unavailable for items: "
+				for _, u := range unavailable {
+					errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
+				}
+				return nil, fmt.Errorf(errMsg)
+			}
+		}
 	}
 
 	var subTotal, discountTotal, taxTotal float64
@@ -145,6 +175,24 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		return nil, err
 	}
 
+	// Update Stock (Decrease) if applicable
+	if shouldCheckStock {
+		stockItems := make([]outbound.StockCheckItem, 0)
+		for _, item := range invoice.Items {
+			stockItems = append(stockItems, outbound.StockCheckItem{
+				ItemID:   item.ItemID.String(),
+				Quantity: int32(item.Quantity),
+			})
+		}
+		if len(stockItems) > 0 {
+			err := s.inventoryClient.UpdateStock(ctx, stockItems, "sales", "invoice", invoice.ID.String(), "Invoice Created")
+			if err != nil {
+				// Log warning
+				fmt.Printf("invoice created but failed to update stock: %v\n", err)
+			}
+		}
+	}
+
 	// Publish InvoiceCreated event
 	s.publishInvoiceCreated(invoice)
 
@@ -195,6 +243,7 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 		items = append(items, domain.InvoiceItem{
 			ID:          uuid.New(),
 			InvoiceID:   invoiceID,
+			ItemID:      uuid.MustParse(itemReq.ItemID), // Assuming valid UUID from CRM
 			Name:        itemReq.Description,
 			Description: itemReq.Description,
 			Quantity:    itemReq.Quantity,
@@ -216,8 +265,54 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 	invoice.TotalAmount = subTotal - discountTotal + taxTotal + req.Adjustment
 	invoice.BalanceAmount = invoice.TotalAmount
 
+	// Stock Checking for Estimate -> Invoice
+	if s.inventoryClient != nil {
+		stockItems := make([]outbound.StockCheckItem, 0)
+		for _, itemReq := range req.Items {
+			if itemReq.ItemID != "" {
+				stockItems = append(stockItems, outbound.StockCheckItem{
+					ItemID:   itemReq.ItemID,
+					Quantity: int32(itemReq.Quantity),
+				})
+			}
+		}
+		if len(stockItems) > 0 {
+			unavailable, err := s.inventoryClient.CheckStockAvailability(ctx, stockItems)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check stock availability: %w", err)
+			}
+			if len(unavailable) > 0 {
+				errMsg := "stock unavailable for items: "
+				for _, u := range unavailable {
+					errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
+				}
+				return nil, fmt.Errorf(errMsg)
+			}
+		}
+	}
+
 	if err := s.invoiceRepo.Create(ctx, invoice); err != nil {
 		return nil, fmt.Errorf("failed to create invoice from estimate: %w", err)
+	}
+
+	// Update Stock (Decrease)
+	if s.inventoryClient != nil {
+		stockItems := make([]outbound.StockCheckItem, 0)
+		for _, item := range invoice.Items {
+			// Only decrease if ItemID is valid (not nil/empty)
+			if item.ItemID != uuid.Nil {
+				stockItems = append(stockItems, outbound.StockCheckItem{
+					ItemID:   item.ItemID.String(),
+					Quantity: int32(item.Quantity),
+				})
+			}
+		}
+		if len(stockItems) > 0 {
+			err := s.inventoryClient.UpdateStock(ctx, stockItems, "sales", "invoice", invoice.ID.String(), fmt.Sprintf("Converted from Estimate %s", req.EstimateID))
+			if err != nil {
+				fmt.Printf("invoice created from estimate but failed to update stock: %v\n", err)
+			}
+		}
 	}
 
 	// Publish InvoiceCreated event

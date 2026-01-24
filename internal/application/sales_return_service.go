@@ -9,6 +9,7 @@ import (
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
 	"erp-billing-service/internal/ports/repositories"
+	"erp-billing-service/internal/ports/outbound"
 	shared_events "github.com/efs/shared-events"
 )
 
@@ -19,6 +20,7 @@ type SalesReturnService struct {
 	invoiceRepo     domain.InvoiceRepository
 	paymentRepo     domain.PaymentRepository
 	eventPublisher  domain.EventPublisher
+	inventoryClient outbound.InventoryClient
 }
 
 // NewSalesReturnService creates a new sales return service
@@ -28,6 +30,7 @@ func NewSalesReturnService(
 	invoiceRepo domain.InvoiceRepository,
 	paymentRepo domain.PaymentRepository,
 	eventPublisher domain.EventPublisher,
+	inventoryClient outbound.InventoryClient,
 ) *SalesReturnService {
 	return &SalesReturnService{
 		salesReturnRepo: salesReturnRepo,
@@ -35,6 +38,7 @@ func NewSalesReturnService(
 		invoiceRepo:     invoiceRepo,
 		paymentRepo:     paymentRepo,
 		eventPublisher:  eventPublisher,
+		inventoryClient: inventoryClient,
 	}
 }
 
@@ -236,6 +240,43 @@ func (s *SalesReturnService) ProcessRefund(id uuid.UUID, req *dto.ProcessRefundR
 	// Save
 	if err := s.salesReturnRepo.Update(salesReturn); err != nil {
 		return nil, fmt.Errorf("failed to update sales return: %w", err)
+	}
+
+	// Update stock (Increase)
+	if s.inventoryClient != nil {
+		stockItems := make([]outbound.StockCheckItem, 0)
+		// Based on `CreateSalesReturn` (lines 69-83), it only maps `SalesOrderItemID`.
+		// It assumes `SalesReturnItem` struct has `SalesOrderItemID` but maybe not `ItemID`.
+		// If I cannot get ItemID easily, I have to fetch SalesOrder items again.
+		// I have `salesOrder` in `ProcessRefund`.
+		// I can map SalesOrderItemID -> ItemID using `salesOrder.Items`.
+		// Let's do that.
+		
+		for _, returnItem := range salesReturn.Items {
+			var itemID string
+			// Find corresponding item in salesOrder
+			for _, soItem := range salesOrder.Items {
+				if soItem.ID == returnItem.SalesOrderItemID {
+					itemID = soItem.ItemID.String()
+					break
+				}
+			}
+			if itemID != "" {
+				stockItems = append(stockItems, outbound.StockCheckItem{
+					ItemID:   itemID,
+					Quantity: int32(returnItem.ReturnedQuantity),
+				})
+			}
+		}
+
+		if len(stockItems) > 0 {
+			// TransactionType: 'return', ReferenceType: 'sales_return'
+			err := s.inventoryClient.UpdateStock(context.Background(), stockItems, "return", "sales_return", salesReturn.ID.String(), "Sales Return Refunded")
+			if err != nil {
+				// Log warning
+				fmt.Printf("sales return refunded but failed to update stock: %v\n", err)
+			}
+		}
 	}
 
 	// Publish events

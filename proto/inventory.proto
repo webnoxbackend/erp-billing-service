@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package serviceandparts;
+option go_package = "erp-billing-service/proto";
+
+// Stock messages
+message StockItemRequest {
+  string item_id = 1;
+  int32 quantity = 2;
+}
+
+message CheckStockAvailabilityRequest {
+  repeated StockItemRequest items = 1;
+}
+
+message UnavailableItem {
+  string item_id = 1;
+  string item_name = 2;
+  int32 requested_quantity = 3;
+  int32 available_quantity = 4;
+}
+
+message CheckStockAvailabilityResponse {
+  bool available = 1;
+  repeated UnavailableItem unavailable_items = 2;
+}
+
+message UpdateStockRequest {
+  repeated StockItemRequest items = 1;
+  string transaction_type = 2; // 'purchase', 'sales', 'return', 'adjustment', 'allocation'
+  string reference_type = 3;   // 'sales_order', 'invoice', 'work_order', 'return'
+  string reference_id = 4;
+  string notes = 5;
+}
+
+message UpdateStockResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+service ServiceAndPartsService {
+  rpc CheckStockAvailability(CheckStockAvailabilityRequest) returns (CheckStockAvailabilityResponse);
+  rpc UpdateStock(UpdateStockRequest) returns (UpdateStockResponse);
+}
