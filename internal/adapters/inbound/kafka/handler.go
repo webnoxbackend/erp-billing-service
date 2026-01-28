@@ -48,6 +48,8 @@ func (h *EventHandler) Handle(ctx context.Context, data []byte) error {
 			return h.handlePartEvent(tx, baseEvent)
 		case shared_events.AggregateWorkOrder:
 			return h.handleWorkOrderEvent(tx, baseEvent)
+		case "invoice":
+			return h.handleInvoiceEvent(tx, baseEvent)
 		default:
 			log.Printf("Ignoring unrelated aggregate type: %s", baseEvent.Metadata.AggregateType)
 			return nil

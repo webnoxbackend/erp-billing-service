@@ -18,6 +18,7 @@ type Config struct {
 	RefreshTokenExpiry time.Duration
 	GRPCPort           string
 	HTTPPort           string
+	InventoryServiceURL string
 }
 
 // Load loads configuration from environment variables
@@ -40,6 +41,7 @@ func Load() (*Config, error) {
 		JWTSecret:          getEnv("JWT_SECRET", "your-secret-key"),
 		AccessTokenExpiry:  accessTokenExpiry,
 		RefreshTokenExpiry: refreshTokenExpiry,
+		InventoryServiceURL: getEnv("INVENTORY_SERVICE_URL", "efs-serviceandparts-service:50051"),
 	}, nil
 }
 
