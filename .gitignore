@@ -21,7 +21,7 @@ vendor/
 go.work
 
 # Environment files
-.env
+# .env
 .env.local
 .env.*.local
 
