@@ -83,10 +83,10 @@ func (h *InvoiceHandler) ListInvoices(w http.ResponseWriter, r *http.Request) {
 
 	// Get module filter from query params (optional)
 	moduleFilter := strings.ToUpper(r.URL.Query().Get("module"))
-	
+
 	var err error
 	var result interface{}
-	
+
 	if moduleFilter != "" {
 		// Filter by specific module (FSM, CRM, INVENTORY)
 		var sourceSystem domain.SourceSystem
@@ -101,7 +101,7 @@ func (h *InvoiceHandler) ListInvoices(w http.ResponseWriter, r *http.Request) {
 			// Invalid module, return all
 			result, err = h.service.ListInvoices(r.Context(), orgID)
 		}
-		
+
 		if sourceSystem != "" {
 			result, err = h.service.ListInvoicesByModule(r.Context(), orgID, sourceSystem)
 		}
@@ -109,7 +109,7 @@ func (h *InvoiceHandler) ListInvoices(w http.ResponseWriter, r *http.Request) {
 		// No filter, return all invoices
 		result, err = h.service.ListInvoices(r.Context(), orgID)
 	}
-	
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

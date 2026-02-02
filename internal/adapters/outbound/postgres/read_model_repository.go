@@ -15,11 +15,12 @@ import (
 )
 
 type ReadModelRepository struct {
-	db *gorm.DB
+	db               *gorm.DB
+	inventoryBaseURL string
 }
 
-func NewReadModelRepository(db *gorm.DB) *ReadModelRepository {
-	return &ReadModelRepository{db: db}
+func NewReadModelRepository(db *gorm.DB, inventoryBaseURL string) *ReadModelRepository {
+	return &ReadModelRepository{db: db, inventoryBaseURL: inventoryBaseURL}
 }
 
 func (r *ReadModelRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*domain.CustomerRM, error) {
@@ -49,7 +50,7 @@ func (r *ReadModelRepository) GetItem(ctx context.Context, id uuid.UUID) (*domai
 
 func (r *ReadModelRepository) SearchItems(ctx context.Context, orgID uuid.UUID, query string) ([]domain.ItemRM, error) {
 	// Call the serviceandparts service API to get items
-	baseURL := "http://localhost:8087/api/v1/items"
+	baseURL := r.inventoryBaseURL + "/api/v1/items"
 	params := url.Values{}
 	params.Add("organization_id", orgID.String())
 	if query != "" {

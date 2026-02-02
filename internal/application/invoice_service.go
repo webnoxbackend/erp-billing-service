@@ -12,14 +12,16 @@ import (
 
 	shared_events "github.com/efs/shared-events"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type InvoiceService struct {
-	invoiceRepo    domain.InvoiceRepository
-	rmRepo         domain.ReadModelRepository
-	auditRepo      domain.AuditLogRepository
-	eventPublisher domain.EventPublisher
-	pdfService     *PDFService // Added for PDF generation
+	invoiceRepo     domain.InvoiceRepository
+	rmRepo          domain.ReadModelRepository
+	auditRepo       domain.AuditLogRepository
+	eventPublisher  domain.EventPublisher
+	pdfService      *PDFService // Added for PDF generation
 	inventoryClient outbound.InventoryClient
 }
 
@@ -32,11 +34,11 @@ func NewInvoiceService(
 	inventoryClient outbound.InventoryClient,
 ) *InvoiceService {
 	return &InvoiceService{
-		invoiceRepo:    invoiceRepo,
-		rmRepo:         rmRepo,
-		auditRepo:      auditRepo,
-		eventPublisher: eventPublisher,
-		pdfService:     pdfService,
+		invoiceRepo:     invoiceRepo,
+		rmRepo:          rmRepo,
+		auditRepo:       auditRepo,
+		eventPublisher:  eventPublisher,
+		pdfService:      pdfService,
 		inventoryClient: inventoryClient,
 	}
 }
@@ -55,11 +57,11 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		ID:             invoiceID,
 		OrganizationID: orgID,
 		CustomerID:     req.CustomerID,
-		
+
 		// Source tracking - makes billing source-agnostic
 		SourceSystem:      sourceSystem,
 		SourceReferenceID: req.SourceReferenceID,
-		
+
 		ContactID:       req.ContactID,
 		OwnerID:         req.OwnerID,
 		Subject:         req.Subject,
@@ -102,9 +104,13 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		if len(stockItems) > 0 {
 			unavailable, err := s.inventoryClient.CheckStockAvailability(ctx, stockItems)
 			if err != nil {
-				return nil, fmt.Errorf("failed to check stock availability: %w", err)
-			}
-			if len(unavailable) > 0 {
+				// If method is not implemented, log warning and continue
+				if st, ok := status.FromError(err); ok && st.Code() == codes.Unimplemented {
+					fmt.Printf("[WARNING] Inventory service CheckStockAvailability unimplemented: %v\n", err)
+				} else {
+					return nil, fmt.Errorf("failed to check stock availability: %w", err)
+				}
+			} else if len(unavailable) > 0 {
 				errMsg := "stock unavailable for items: "
 				for _, u := range unavailable {
 					errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
@@ -133,7 +139,7 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		}
 
 		itemTotal := (itemReq.Quantity * itemReq.UnitPrice) - itemReq.Discount + itemReq.Tax
-		
+
 		// Serialize metadata to JSON
 		var metadataJSON json.RawMessage
 		if itemReq.Metadata != nil && len(itemReq.Metadata) > 0 {
@@ -196,14 +202,13 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 	// Publish InvoiceCreated event
 	s.publishInvoiceCreated(invoice)
 
-
 	return s.mapToResponse(ctx, invoice), nil
 }
 
 // CreateInvoiceFromEstimate creates an invoice from a CRM estimate
 func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uuid.UUID, req dto.CreateInvoiceFromEstimateRequest) (*dto.InvoiceResponse, error) {
 	invoiceID := uuid.New()
-	
+
 	// Create invoice with CRM source system
 	invoice := &domain.Invoice{
 		ID:                invoiceID,
@@ -279,9 +284,13 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 		if len(stockItems) > 0 {
 			unavailable, err := s.inventoryClient.CheckStockAvailability(ctx, stockItems)
 			if err != nil {
-				return nil, fmt.Errorf("failed to check stock availability: %w", err)
-			}
-			if len(unavailable) > 0 {
+				// If method is not implemented, log warning and continue
+				if st, ok := status.FromError(err); ok && st.Code() == codes.Unimplemented {
+					fmt.Printf("[WARNING] Inventory service CheckStockAvailability unimplemented (Estimate -> Invoice): %v\n", err)
+				} else {
+					return nil, fmt.Errorf("failed to check stock availability: %w", err)
+				}
+			} else if len(unavailable) > 0 {
 				errMsg := "stock unavailable for items: "
 				for _, u := range unavailable {
 					errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
@@ -320,7 +329,6 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 
 	return s.mapToResponse(ctx, invoice), nil
 }
-
 
 // UpdateInvoice updates an existing invoice
 // Only DRAFT invoices can be edited - enforces lifecycle rules
@@ -389,7 +397,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 		}
 
 		itemTotal := (itemReq.Quantity * itemReq.UnitPrice) - itemReq.Discount + itemReq.Tax
-		
+
 		// Serialize metadata
 		var metadataJSON json.RawMessage
 		if itemReq.Metadata != nil && len(itemReq.Metadata) > 0 {
@@ -425,7 +433,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 	invoice.DiscountTotal = discountTotal
 	invoice.TaxTotal = taxTotal
 	invoice.TotalAmount = subTotal - discountTotal + taxTotal + req.Adjustment + req.ExciseDuty
-	
+
 	// TODO: Payment integration - Phase 2
 	// For now, balance equals total since we're not handling payments yet
 	invoice.BalanceAmount = invoice.TotalAmount
@@ -672,11 +680,11 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 	res := &dto.InvoiceResponse{
 		ID:            inv.ID,
 		InvoiceNumber: inv.InvoiceNumber,
-		
+
 		// Source tracking
 		SourceSystem:      string(inv.SourceSystem),
 		SourceReferenceID: inv.SourceReferenceID,
-		
+
 		Subject:         inv.Subject,
 		Status:          string(inv.Status),
 		SubTotal:        inv.SubTotal,
@@ -695,10 +703,10 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 		ContactID:       inv.ContactID,
 		InvoiceDate:     inv.InvoiceDate,
 		DueDate:         inv.DueDate,
-		
+
 		// PDF path
 		PDFPath: inv.PDFPath,
-		
+
 		BillingStreet:   inv.BillingStreet,
 		BillingCity:     inv.BillingCity,
 		BillingState:    inv.BillingState,
@@ -748,7 +756,7 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 				Tax:         item.Tax,
 				Total:       item.Total,
 			}
-			
+
 			// Deserialize metadata if present
 			if len(item.Metadata) > 0 {
 				var metadata map[string]interface{}
@@ -756,7 +764,7 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 					itemResp.Metadata = metadata
 				}
 			}
-			
+
 			res.Items = append(res.Items, itemResp)
 		}
 	}

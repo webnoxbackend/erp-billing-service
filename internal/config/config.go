@@ -10,15 +10,16 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	DatabaseURL        string
-	RedisURL           string
-	RedisPassword      string
-	JWTSecret          string
-	AccessTokenExpiry  time.Duration
-	RefreshTokenExpiry time.Duration
-	GRPCPort           string
-	HTTPPort           string
-	InventoryServiceURL string
+	DatabaseURL             string
+	RedisURL                string
+	RedisPassword           string
+	JWTSecret               string
+	AccessTokenExpiry       time.Duration
+	RefreshTokenExpiry      time.Duration
+	GRPCPort                string
+	HTTPPort                string
+	InventoryServiceURL     string
+	InventoryServiceHTTPURL string
 }
 
 // Load loads configuration from environment variables
@@ -33,15 +34,16 @@ func Load() (*Config, error) {
 	refreshTokenExpiry := time.Duration(refreshExpiry) * time.Second
 
 	return &Config{
-		DatabaseURL:        getEnv("DATABASE_URL", ""),
-		RedisURL:           getEnv("REDIS_URL", "localhost:6379"),
-		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
-		GRPCPort:           getEnv("GRPC_PORT", "50051"),
-		HTTPPort:           getEnv("HTTP_PORT", "8088"),
-		JWTSecret:          getEnv("JWT_SECRET", "your-secret-key"),
-		AccessTokenExpiry:  accessTokenExpiry,
-		RefreshTokenExpiry: refreshTokenExpiry,
-		InventoryServiceURL: getEnv("INVENTORY_SERVICE_URL", "efs-serviceandparts-service:50051"),
+		DatabaseURL:             getEnv("DATABASE_URL", ""),
+		RedisURL:                getEnv("REDIS_URL", "localhost:6379"),
+		RedisPassword:           getEnv("REDIS_PASSWORD", ""),
+		GRPCPort:                getEnv("GRPC_PORT", "50051"),
+		HTTPPort:                getEnv("HTTP_PORT", "8088"),
+		JWTSecret:               getEnv("JWT_SECRET", "your-secret-key"),
+		AccessTokenExpiry:       accessTokenExpiry,
+		RefreshTokenExpiry:      refreshTokenExpiry,
+		InventoryServiceURL:     getEnv("INVENTORY_SERVICE_URL", "serviceandparts-service:50057"),
+		InventoryServiceHTTPURL: getEnv("INVENTORY_SERVICE_HTTP_URL", "http://serviceandparts-service:8087"),
 	}, nil
 }
 

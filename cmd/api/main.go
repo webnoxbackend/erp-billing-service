@@ -11,9 +11,9 @@ import (
 
 	billing_http "erp-billing-service/internal/adapters/inbound/http"
 	"erp-billing-service/internal/adapters/inbound/kafka"
+	grpc_adapter "erp-billing-service/internal/adapters/outbound/grpc"
 	kafka_outbound "erp-billing-service/internal/adapters/outbound/kafka"
 	"erp-billing-service/internal/adapters/outbound/postgres"
-	grpc_adapter "erp-billing-service/internal/adapters/outbound/grpc"
 	"erp-billing-service/internal/application"
 	"erp-billing-service/internal/config"
 	"erp-billing-service/internal/database"
@@ -52,7 +52,7 @@ func main() {
 	invoiceRepo := postgres.NewInvoiceRepository(db)
 	paymentRepo := postgres.NewPaymentRepository(db)
 	auditRepo := postgres.NewAuditLogRepository(db)
-	rmRepo := postgres.NewReadModelRepository(db)
+	rmRepo := postgres.NewReadModelRepository(db, cfg.InventoryServiceHTTPURL)
 	salesOrderRepo := postgres.NewSalesOrderRepository(db)
 	salesReturnRepo := postgres.NewSalesReturnRepository(db)
 	eventPublisher := kafka_outbound.NewEventPublisher(producer)
@@ -111,12 +111,12 @@ func main() {
 	api.HandleFunc("/billing/invoices/{id}", invoiceHandler.DeleteInvoice).Methods("DELETE")
 	api.HandleFunc("/billing/invoices/{id}/status", invoiceHandler.UpdateStatus).Methods("PATCH")
 	api.HandleFunc("/billing/invoices/{id}/audit-logs", invoiceHandler.GetAuditLogs).Methods("GET")
-	
+
 	// New Invoice Workflow Routes
 	api.HandleFunc("/billing/invoices/{id}/send", invoiceHandler.SendInvoice).Methods("POST")
 	api.HandleFunc("/billing/invoices/{id}/pdf", invoiceHandler.DownloadInvoicePDF).Methods("GET")
 	api.HandleFunc("/billing/invoices/{id}/preview", invoiceHandler.PreviewInvoicePDF).Methods("GET")
-	
+
 	// Estimate to Invoice Conversion Route
 	api.HandleFunc("/billing/estimates/{id}/invoice", estimateInvoiceHandler.CreateInvoiceFromEstimate).Methods("POST")
 

@@ -123,7 +123,9 @@ func (h *PaymentHandler) ListPaymentsByInvoice(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(payments)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": payments,
+	})
 }
 
 // GetPayment handles GET /api/v1/billing/payments/{id}
