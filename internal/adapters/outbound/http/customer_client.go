@@ -34,8 +34,12 @@ func (c *CustomerHTTPClient) GetCustomer(ctx context.Context, id uuid.UUID) (*do
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// This assumes internal service-to-service communication doesn't need complex auth or uses a shared secret/network trust
-	// If needed, add headers here.
+	// Pass Organization ID if available in context
+	if orgID, ok := ctx.Value("organization_id").(string); ok {
+		req.Header.Set("X-Organization-ID", orgID)
+	} else if orgID, ok := ctx.Value("organization_id").(uuid.UUID); ok {
+		req.Header.Set("X-Organization-ID", orgID.String())
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -51,34 +55,34 @@ func (c *CustomerHTTPClient) GetCustomer(ctx context.Context, id uuid.UUID) (*do
 		return nil, fmt.Errorf("customer service returned status: %d", resp.StatusCode)
 	}
 
-	// The response structure from Customer Service might differ slightly, but let's assume it maps somewhat or we map it.
-	// We need to map the external response to our CustomerRM
-	var externalCust struct {
-		ID             uuid.UUID `json:"id"`
-		OrganizationID uuid.UUID `json:"organization_id"`
-		DisplayName    string    `json:"display_name"`
-		CompanyName    string    `json:"company_name"`
-		Email          string    `json:"email"`
-		PhoneWork      string    `json:"phone_work"`
-		// Address fields might be nested or flat, adjusting based on typical patterns.
-		// Assuming flat or we might need to adjust.
-		Street1 string `json:"street1"`
-		City    string `json:"city"`
-		State   string `json:"state"`
-		ZipCode string `json:"zip_code"`
-		Country string `json:"country"`
-
-		ShippingStreet1 string `json:"shipping_street1"`
-		ShippingCity    string `json:"shipping_city"`
-		ShippingState   string `json:"shipping_state"`
-		ShippingZipCode string `json:"shipping_zip_code"`
-		ShippingCountry string `json:"shipping_country"`
+	// Customer Service wraps responses in a "data" field
+	var response struct {
+		Status string `json:"status"`
+		Data   struct {
+			ID              uuid.UUID `json:"id"`
+			OrganizationID  uuid.UUID `json:"organization_id"`
+			DisplayName     string    `json:"display_name"`
+			CompanyName     string    `json:"company_name"`
+			Email           string    `json:"email"`
+			PhoneWork       string    `json:"phone_work"`
+			Street1         string    `json:"street1"`
+			City            string    `json:"city"`
+			State           string    `json:"state"`
+			ZipCode         string    `json:"zip_code"`
+			Country         string    `json:"country"`
+			ShippingStreet1 string    `json:"shipping_street1"`
+			ShippingCity    string    `json:"shipping_city"`
+			ShippingState   string    `json:"shipping_state"`
+			ShippingZipCode string    `json:"shipping_zip_code"`
+			ShippingCountry string    `json:"shipping_country"`
+		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&externalCust); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
+	externalCust := response.Data
 	return &domain.CustomerRM{
 		ID:              externalCust.ID,
 		OrganizationID:  externalCust.OrganizationID,
@@ -96,16 +100,22 @@ func (c *CustomerHTTPClient) GetCustomer(ctx context.Context, id uuid.UUID) (*do
 		ShippingState:   externalCust.ShippingState,
 		ShippingCode:    externalCust.ShippingZipCode,
 		ShippingCountry: externalCust.ShippingCountry,
-		UpdatedAt:       time.Now(), // Fresh fetch
+		UpdatedAt:       time.Now(),
 	}, nil
 }
 
 func (c *CustomerHTTPClient) GetContact(ctx context.Context, id uuid.UUID) (*domain.ContactRM, error) {
-	// Assuming contacts are fetched similarly
 	url := fmt.Sprintf("%s/api/v1/contacts/%s", c.baseURL, id.String())
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Pass Organization ID if available in context
+	if orgID, ok := ctx.Value("organization_id").(string); ok {
+		req.Header.Set("X-Organization-ID", orgID)
+	} else if orgID, ok := ctx.Value("organization_id").(uuid.UUID); ok {
+		req.Header.Set("X-Organization-ID", orgID.String())
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -122,19 +132,24 @@ func (c *CustomerHTTPClient) GetContact(ctx context.Context, id uuid.UUID) (*dom
 		return nil, fmt.Errorf("customer service returned status: %d", resp.StatusCode)
 	}
 
-	var externalContact struct {
-		ID         uuid.UUID `json:"id"`
-		CustomerID uuid.UUID `json:"customer_id"`
-		FirstName  string    `json:"first_name"`
-		LastName   string    `json:"last_name"`
-		Email      string    `json:"email"`
-		Phone      string    `json:"phone"`
+	// Contact Service also wraps responses
+	var response struct {
+		Status string `json:"status"`
+		Data   struct {
+			ID         uuid.UUID `json:"id"`
+			CustomerID uuid.UUID `json:"customer_id"`
+			FirstName  string    `json:"first_name"`
+			LastName   string    `json:"last_name"`
+			Email      string    `json:"email"`
+			Phone      string    `json:"phone"`
+		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&externalContact); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
+	externalContact := response.Data
 	return &domain.ContactRM{
 		ID:         externalContact.ID,
 		CustomerID: externalContact.CustomerID,

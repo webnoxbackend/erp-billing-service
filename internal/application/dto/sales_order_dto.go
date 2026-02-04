@@ -56,8 +56,10 @@ type SalesOrderResponse struct {
 	ID             uuid.UUID           `json:"id"`
 	OrganizationID uuid.UUID           `json:"organization_id"`
 	CustomerID     uuid.UUID           `json:"customer_id"`
+	CustomerName   string              `json:"customer_name,omitempty"`
 	ContactID      *uuid.UUID          `json:"contact_id,omitempty"`
 	OrderNumber    *string             `json:"order_number,omitempty"`
+	Subject        string              `json:"subject,omitempty"`
 	OrderDate      time.Time           `json:"order_date"`
 	Status         string              `json:"status"`
 	SubTotal       float64             `json:"sub_total"`
@@ -73,6 +75,24 @@ type SalesOrderResponse struct {
 	Items          []SalesOrderItemDTO `json:"items"`
 	CreatedAt      time.Time           `json:"created_at"`
 	UpdatedAt      time.Time           `json:"updated_at"`
+
+	Customer *CustomerResponse `json:"customer,omitempty"`
+	Contact  *ContactResponse  `json:"contact,omitempty"`
+
+	// Additional fields for invoice creation
+	BillingStreet   string  `json:"billing_street,omitempty"`
+	BillingCity     string  `json:"billing_city,omitempty"`
+	BillingState    string  `json:"billing_state,omitempty"`
+	BillingCode     string  `json:"billing_code,omitempty"`
+	BillingCountry  string  `json:"billing_country,omitempty"`
+	ShippingStreet  string  `json:"shipping_street,omitempty"`
+	ShippingCity    string  `json:"shipping_city,omitempty"`
+	ShippingState   string  `json:"shipping_state,omitempty"`
+	ShippingCode    string  `json:"shipping_code,omitempty"`
+	ShippingCountry string  `json:"shipping_country,omitempty"`
+	TDSPercentage   float64 `json:"tds_percentage,omitempty"`
+	TCSPercentage   float64 `json:"tcs_percentage,omitempty"`
+	Adjustment      float64 `json:"adjustment,omitempty"`
 }
 
 // SalesOrderFilters represents filters for listing sales orders

@@ -784,8 +784,8 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 		// Last resort fallback using stored address if available, or "Generic Customer"
 		res.Customer = &dto.CustomerResponse{
 			ID:          inv.CustomerID,
-			DisplayName: "Generic Customer", // Still fallback, but hopefully HTTP client works
-			CompanyName: "Generic Customer",
+			DisplayName: "Unknown Customer",
+			CompanyName: "Unknown Customer",
 		}
 	}
 

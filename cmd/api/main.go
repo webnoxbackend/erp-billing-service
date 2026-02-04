@@ -83,7 +83,7 @@ func main() {
 	// 6. Initialize Services
 	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService, inventoryClient, customerClient)
 	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, salesOrderRepo, auditRepo, eventPublisher)
-	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, eventPublisher, inventoryClient)
+	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, eventPublisher, inventoryClient, customerClient)
 	salesReturnService := application.NewSalesReturnService(salesReturnRepo, salesOrderRepo, invoiceRepo, paymentRepo, eventPublisher, inventoryClient)
 
 	// 7. Initialize Kafka Consumers

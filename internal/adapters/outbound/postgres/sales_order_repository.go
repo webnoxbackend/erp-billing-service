@@ -7,6 +7,7 @@ import (
 
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
+
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -19,6 +20,11 @@ type SalesOrderRepository struct {
 // NewSalesOrderRepository creates a new sales order repository
 func NewSalesOrderRepository(db *gorm.DB) *SalesOrderRepository {
 	return &SalesOrderRepository{db: db}
+}
+
+// DB returns the underlying database connection
+func (r *SalesOrderRepository) DB() *gorm.DB {
+	return r.db
 }
 
 // Create creates a new sales order
@@ -98,7 +104,7 @@ func (r *SalesOrderRepository) Delete(id uuid.UUID) error {
 func (r *SalesOrderRepository) GenerateOrderNumber(orgID uuid.UUID) (string, error) {
 	var count int64
 	today := time.Now().Format("20060102")
-	
+
 	// Count orders created today for this organization
 	err := r.db.Model(&domain.SalesOrder{}).
 		Where("organization_id = ? AND order_number LIKE ?", orgID, "SO-"+today+"%").
@@ -125,4 +131,3 @@ func (r *SalesOrderRepository) FindByInvoiceID(invoiceID uuid.UUID) (*domain.Sal
 func (r *SalesOrderRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status domain.SalesOrderStatus) error {
 	return r.db.WithContext(ctx).Model(&domain.SalesOrder{}).Where("id = ?", id).Update("status", status).Error
 }
-
