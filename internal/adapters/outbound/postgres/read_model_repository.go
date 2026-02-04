@@ -108,7 +108,7 @@ func (r *ReadModelRepository) SearchItems(ctx context.Context, orgID uuid.UUID, 
 			SKU:            item.SKU,
 			Name:           item.Name,
 			ItemType:       item.Type,
-			Price:          price,
+			SellingPrice:   price,
 		})
 	}
 
@@ -118,6 +118,15 @@ func (r *ReadModelRepository) SearchItems(ctx context.Context, orgID uuid.UUID, 
 func (r *ReadModelRepository) GetContact(ctx context.Context, id uuid.UUID) (*domain.ContactRM, error) {
 	var rm domain.ContactRM
 	err := r.db.WithContext(ctx).First(&rm, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &rm, nil
+}
+
+func (r *ReadModelRepository) GetPrimaryContact(ctx context.Context, customerID uuid.UUID) (*domain.ContactRM, error) {
+	var rm domain.ContactRM
+	err := r.db.WithContext(ctx).Where("customer_id = ? AND is_primary = ?", customerID, true).First(&rm).Error
 	if err != nil {
 		return nil, err
 	}

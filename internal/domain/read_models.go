@@ -36,19 +36,44 @@ type ContactRM struct {
 	LastName       string    `json:"last_name"`
 	Email          string    `json:"email"`
 	Phone          string    `json:"phone"`
+	Mobile         string    `json:"mobile"`
+	IsPrimary      bool      `json:"is_primary"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // ItemRM represents a read-optimized version of a Service or Part
+// This is a complete read-only replica for sales order and inventory management
 type ItemRM struct {
 	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	OrganizationID uuid.UUID `gorm:"type:uuid;index" json:"organization_id"`
+	SKU            string    `gorm:"index" json:"sku"`
 	Name           string    `json:"name"`
 	Description    string    `json:"description"`
-	ItemType       string    `json:"item_type"` // "service" or "part"
-	Price          float64   `gorm:"type:decimal(15,2)" json:"price"`
-	SKU            string    `json:"sku"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ItemType       string    `json:"item_type"` // "service", "part", or "goods"
+	Status         string    `json:"status"`    // "active" or "inactive"
+
+	// Pricing Information
+	SellingPrice float64 `gorm:"type:decimal(15,2)" json:"selling_price"`
+	CostPrice    float64 `gorm:"type:decimal(15,2)" json:"cost_price"`
+	Currency     string  `json:"currency"`
+
+	// Unit Information
+	Unit string `json:"unit"` // e.g., "pcs", "kg", "ltr"
+
+	// Inventory Information (for goods/parts only)
+	QuantityOnHand    float64 `gorm:"type:decimal(15,2);default:0" json:"quantity_on_hand"`
+	QuantityAvailable float64 `gorm:"type:decimal(15,2);default:0" json:"quantity_available"`
+	QuantityReserved  float64 `gorm:"type:decimal(15,2);default:0" json:"quantity_reserved"`
+	QuantityDamaged   float64 `gorm:"type:decimal(15,2);default:0" json:"quantity_damaged"`
+	ReorderLevel      float64 `gorm:"type:decimal(15,2);default:0" json:"reorder_level"`
+	ReorderQuantity   float64 `gorm:"type:decimal(15,2);default:0" json:"reorder_quantity"`
+	TrackInventory    bool    `gorm:"default:false" json:"track_inventory"`
+
+	// Tax Information
+	Taxable bool    `gorm:"default:false" json:"taxable"`
+	TaxRate float64 `gorm:"type:decimal(5,2);default:0" json:"tax_rate"`
+
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // WorkOrderRM represents a read-optimized version of a Work Order

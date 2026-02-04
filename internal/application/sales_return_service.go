@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
-	"erp-billing-service/internal/ports/repositories"
 	"erp-billing-service/internal/ports/outbound"
+	"erp-billing-service/internal/ports/repositories"
+
 	shared_events "github.com/efs/shared-events"
+	"github.com/google/uuid"
 )
 
 // SalesReturnService handles sales return business logic
@@ -52,7 +53,7 @@ func (s *SalesReturnService) CreateSalesReturn(req *dto.CreateSalesReturnRequest
 
 	// Validate order can be returned (must be paid and shipped)
 	if !salesOrder.CanReturn() {
-		return nil, fmt.Errorf("sales order must be paid and shipped to create a return (current status: %s, shipped: %v)", 
+		return nil, fmt.Errorf("sales order must be paid and shipped to create a return (current status: %s, shipped: %v)",
 			salesOrder.Status, salesOrder.ShippedDate != nil)
 	}
 
@@ -165,24 +166,32 @@ func (s *SalesReturnService) ReceiveReturn(id uuid.UUID, req *dto.ReceiveReturnR
 
 // ProcessRefund processes a refund payment for a sales return
 func (s *SalesReturnService) ProcessRefund(id uuid.UUID, req *dto.ProcessRefundRequest) (*dto.SalesReturnResponse, error) {
+	fmt.Printf("[DEBUG] ProcessRefund called for sales return ID: %s\n", id)
+
 	// Retrieve return
 	salesReturn, err := s.salesReturnRepo.FindByID(id)
 	if err != nil {
+		fmt.Printf("[ERROR] Failed to find sales return: %v\n", err)
 		return nil, fmt.Errorf("failed to find sales return: %w", err)
 	}
+	fmt.Printf("[DEBUG] Sales return found: status=%s, refund_payment_id=%v\n", salesReturn.Status, salesReturn.RefundPaymentID)
 
 	// Check if can refund
 	if !salesReturn.CanRefund() {
+		fmt.Printf("[ERROR] Cannot refund: status=%s, refund_payment_id=%v\n", salesReturn.Status, salesReturn.RefundPaymentID)
 		return nil, fmt.Errorf("cannot process refund for sales return in %s status or refund already processed", salesReturn.Status)
 	}
 
 	// Retrieve sales order to get invoice
 	salesOrder, err := s.salesOrderRepo.FindByID(salesReturn.SalesOrderID)
 	if err != nil {
+		fmt.Printf("[ERROR] Failed to find sales order: %v\n", err)
 		return nil, fmt.Errorf("failed to find sales order: %w", err)
 	}
+	fmt.Printf("[DEBUG] Sales order found: invoice_id=%v\n", salesOrder.InvoiceID)
 
 	if salesOrder.InvoiceID == nil {
+		fmt.Printf("[ERROR] Sales order has no associated invoice\n")
 		return nil, fmt.Errorf("sales order has no associated invoice")
 	}
 
@@ -251,7 +260,7 @@ func (s *SalesReturnService) ProcessRefund(id uuid.UUID, req *dto.ProcessRefundR
 		// I have `salesOrder` in `ProcessRefund`.
 		// I can map SalesOrderItemID -> ItemID using `salesOrder.Items`.
 		// Let's do that.
-		
+
 		for _, returnItem := range salesReturn.Items {
 			var itemID string
 			// Find corresponding item in salesOrder

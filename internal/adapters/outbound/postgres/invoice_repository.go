@@ -38,13 +38,20 @@ func (r *InvoiceRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.
 
 func (r *InvoiceRepository) List(ctx context.Context, filter map[string]interface{}) ([]domain.Invoice, error) {
 	var invoices []domain.Invoice
-	err := r.db.WithContext(ctx).Where(filter).Order("created_at desc").Find(&invoices).Error
+	err := r.db.WithContext(ctx).
+		Preload("Items").
+		Preload("Payments").
+		Where(filter).
+		Order("created_at desc").
+		Find(&invoices).Error
 	return invoices, err
 }
 
 func (r *InvoiceRepository) ListByModule(ctx context.Context, orgID uuid.UUID, sourceSystem domain.SourceSystem) ([]domain.Invoice, error) {
 	var invoices []domain.Invoice
 	err := r.db.WithContext(ctx).
+		Preload("Items").
+		Preload("Payments").
 		Where("organization_id = ? AND source_system = ?", orgID, sourceSystem).
 		Order("created_at desc").
 		Find(&invoices).Error

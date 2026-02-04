@@ -59,7 +59,9 @@ func (s *PaymentService) RecordPayment(ctx context.Context, req dto.RecordPaymen
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("payment amount must be greater than zero")
 	}
-	if req.Amount > invoice.BalanceAmount {
+
+	const epsilon = 0.01
+	if req.Amount > (invoice.BalanceAmount + epsilon) {
 		return nil, fmt.Errorf("payment amount (%.2f) exceeds balance due (%.2f)", req.Amount, invoice.BalanceAmount)
 	}
 
@@ -73,7 +75,9 @@ func (s *PaymentService) RecordPayment(ctx context.Context, req dto.RecordPaymen
 		}
 	}
 
-	// 4. Create payment record
+	// 4. Create payment and update invoice in a single save flow
+	fmt.Printf("[INFO] Recording payment of %.2f for invoice %s (Current Balance: %.2f)\n", req.Amount, invoice.ID, invoice.BalanceAmount)
+
 	payment := &domain.Payment{
 		ID:             uuid.New(),
 		OrganizationID: invoice.OrganizationID,
@@ -99,6 +103,7 @@ func (s *PaymentService) RecordPayment(ctx context.Context, req dto.RecordPaymen
 
 	// 6. Derive new status from payment amounts
 	invoice.Status = invoice.CalculateStatus()
+	fmt.Printf("[INFO] Invoice %s status updated: %s -> %s (Remaining Balance: %.2f)\n", invoice.ID, oldStatus, invoice.Status, invoice.BalanceAmount)
 
 	if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
 		return nil, fmt.Errorf("failed to update invoice: %w", err)
@@ -282,8 +287,8 @@ func (s *PaymentService) publishPaymentReceived(payment *domain.Payment, invoice
 	}
 
 	metadata := shared_events.NewEventMetadata(
-		shared_events.EventType("billing.payment.received"),
-		shared_events.AggregateType("payment"),
+		shared_events.PaymentCreated,
+		shared_events.AggregatePayment,
 		payment.ID.String(),
 	)
 	s.eventPublisher.Publish(context.Background(), metadata, event)
@@ -306,8 +311,8 @@ func (s *PaymentService) publishPaymentRecorded(payment *domain.Payment, invoice
 	}
 
 	metadata := shared_events.NewEventMetadata(
-		shared_events.EventType("payment.recorded"),
-		shared_events.AggregateType("payment"),
+		shared_events.PaymentRecorded,
+		shared_events.AggregatePayment,
 		payment.ID.String(),
 	)
 	s.eventPublisher.Publish(context.Background(), metadata, event)
@@ -325,8 +330,8 @@ func (s *PaymentService) publishInvoicePartiallyPaid(invoice *domain.Invoice) {
 	}
 
 	metadata := shared_events.NewEventMetadata(
-		shared_events.EventType("billing.invoice.partially_paid"),
-		shared_events.AggregateType("invoice"),
+		shared_events.InvoiceStatusChanged,
+		shared_events.AggregateInvoice,
 		invoice.ID.String(),
 	)
 	s.eventPublisher.Publish(context.Background(), metadata, event)
@@ -344,8 +349,8 @@ func (s *PaymentService) publishInvoicePaid(invoice *domain.Invoice) {
 	}
 
 	metadata := shared_events.NewEventMetadata(
-		shared_events.EventType("billing.invoice.paid"),
-		shared_events.AggregateType("invoice"),
+		shared_events.InvoiceStatusChanged, // Or InvoicePaid if we add it, but status_changed is safer
+		shared_events.AggregateInvoice,
 		invoice.ID.String(),
 	)
 	s.eventPublisher.Publish(context.Background(), metadata, event)

@@ -23,6 +23,7 @@ type InvoiceService struct {
 	eventPublisher  domain.EventPublisher
 	pdfService      *PDFService // Added for PDF generation
 	inventoryClient outbound.InventoryClient
+	customerClient  outbound.CustomerClient
 }
 
 func NewInvoiceService(
@@ -32,6 +33,7 @@ func NewInvoiceService(
 	eventPublisher domain.EventPublisher,
 	pdfService *PDFService,
 	inventoryClient outbound.InventoryClient,
+	customerClient outbound.CustomerClient,
 ) *InvoiceService {
 	return &InvoiceService{
 		invoiceRepo:     invoiceRepo,
@@ -40,6 +42,7 @@ func NewInvoiceService(
 		eventPublisher:  eventPublisher,
 		pdfService:      pdfService,
 		inventoryClient: inventoryClient,
+		customerClient:  customerClient,
 	}
 }
 
@@ -75,6 +78,7 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		ExciseDuty:      req.ExciseDuty,
 		SalesCommission: req.SalesCommission,
 		SalesOrder:      req.SalesOrder,
+		SalesOrderID:    req.SalesOrderID,
 		PurchaseOrder:   req.PurchaseOrder,
 		Terms:           req.Terms,
 		Notes:           req.Notes,
@@ -90,35 +94,39 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		ShippingCountry: req.ShippingCountry,
 	}
 
-	// Stock Management
-	shouldCheckStock := invoice.SalesOrderID == nil && s.inventoryClient != nil
+	// Stock Management - DISABLED for draft invoice creation
+	// Stock will be checked when invoice is sent (DRAFT → SENT)
+	// This allows creating draft invoices without stock constraints
+	/*
+		shouldCheckStock := invoice.SalesOrderID == nil && s.inventoryClient != nil
 
-	if shouldCheckStock {
-		stockItems := make([]outbound.StockCheckItem, 0)
-		for _, itemReq := range req.Items {
-			stockItems = append(stockItems, outbound.StockCheckItem{
-				ItemID:   itemReq.ItemID.String(),
-				Quantity: int32(itemReq.Quantity),
-			})
-		}
-		if len(stockItems) > 0 {
-			unavailable, err := s.inventoryClient.CheckStockAvailability(ctx, stockItems)
-			if err != nil {
-				// If method is not implemented, log warning and continue
-				if st, ok := status.FromError(err); ok && st.Code() == codes.Unimplemented {
-					fmt.Printf("[WARNING] Inventory service CheckStockAvailability unimplemented: %v\n", err)
-				} else {
-					return nil, fmt.Errorf("failed to check stock availability: %w", err)
+		if shouldCheckStock {
+			stockItems := make([]outbound.StockCheckItem, 0)
+			for _, itemReq := range req.Items {
+				stockItems = append(stockItems, outbound.StockCheckItem{
+					ItemID:   itemReq.ItemID.String(),
+					Quantity: int32(itemReq.Quantity),
+				})
+			}
+			if len(stockItems) > 0 {
+				unavailable, err := s.inventoryClient.CheckStockAvailability(ctx, stockItems)
+				if err != nil {
+					// If method is not implemented, log warning and continue
+					if st, ok := status.FromError(err); ok && st.Code() == codes.Unimplemented {
+						fmt.Printf("[WARNING] Inventory service CheckStockAvailability unimplemented: %v\n", err)
+					} else {
+						return nil, fmt.Errorf("failed to check stock availability: %w", err)
+					}
+				} else if len(unavailable) > 0 {
+					errMsg := "stock unavailable for items: "
+					for _, u := range unavailable {
+						errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
+					}
+					return nil, fmt.Errorf(errMsg)
 				}
-			} else if len(unavailable) > 0 {
-				errMsg := "stock unavailable for items: "
-				for _, u := range unavailable {
-					errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
-				}
-				return nil, fmt.Errorf(errMsg)
 			}
 		}
-	}
+	*/
 
 	var subTotal, discountTotal, taxTotal float64
 	items := make([]domain.InvoiceItem, 0, len(req.Items))
@@ -175,29 +183,33 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 	invoice.DiscountTotal = discountTotal
 	invoice.TaxTotal = taxTotal
 	invoice.TotalAmount = subTotal - discountTotal + taxTotal + req.Adjustment + req.ExciseDuty
+	invoice.PaidAmount = 0
 	invoice.BalanceAmount = invoice.TotalAmount
 
 	if err := s.invoiceRepo.Create(ctx, invoice); err != nil {
 		return nil, err
 	}
 
-	// Update Stock (Decrease) if applicable
-	if shouldCheckStock {
-		stockItems := make([]outbound.StockCheckItem, 0)
-		for _, item := range invoice.Items {
-			stockItems = append(stockItems, outbound.StockCheckItem{
-				ItemID:   item.ItemID.String(),
-				Quantity: int32(item.Quantity),
-			})
-		}
-		if len(stockItems) > 0 {
-			err := s.inventoryClient.UpdateStock(ctx, stockItems, "sales", "invoice", invoice.ID.String(), "Invoice Created")
-			if err != nil {
-				// Log warning
-				fmt.Printf("invoice created but failed to update stock: %v\n", err)
+	// Update Stock (Decrease) if applicable - DISABLED
+	// Stock will be updated when invoice is sent, not when creating a draft
+	/*
+		if shouldCheckStock {
+			stockItems := make([]outbound.StockCheckItem, 0)
+			for _, item := range invoice.Items {
+				stockItems = append(stockItems, outbound.StockCheckItem{
+					ItemID:   item.ItemID.String(),
+					Quantity: int32(item.Quantity),
+				})
+			}
+			if len(stockItems) > 0 {
+				err := s.inventoryClient.UpdateStock(ctx, stockItems, "sales", "invoice", invoice.ID.String(), "Invoice Created")
+				if err != nil {
+					// Log warning
+					fmt.Printf("invoice created but failed to update stock: %v\n", err)
+				}
 			}
 		}
-	}
+	*/
 
 	// Publish InvoiceCreated event
 	s.publishInvoiceCreated(invoice)
@@ -433,10 +445,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 	invoice.DiscountTotal = discountTotal
 	invoice.TaxTotal = taxTotal
 	invoice.TotalAmount = subTotal - discountTotal + taxTotal + req.Adjustment + req.ExciseDuty
-
-	// TODO: Payment integration - Phase 2
-	// For now, balance equals total since we're not handling payments yet
-	invoice.BalanceAmount = invoice.TotalAmount
+	invoice.BalanceAmount = invoice.TotalAmount - invoice.PaidAmount
 
 	if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
 		return nil, err
@@ -471,8 +480,24 @@ func (s *InvoiceService) SendInvoice(ctx context.Context, id uuid.UUID, req dto.
 
 	// 4. Generate PDF
 	customer, err := s.rmRepo.GetCustomer(ctx, invoice.CustomerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch customer for PDF generation: %w", err)
+	if err != nil || customer == nil {
+		fmt.Printf("[WARNING] Customer %s not found for SendInvoice PDF. Using placeholder.\n", invoice.CustomerID)
+		customer = &domain.CustomerRM{
+			ID:              invoice.CustomerID,
+			OrganizationID:  invoice.OrganizationID,
+			DisplayName:     "Customer",
+			CompanyName:     "Customer",
+			BillingStreet:   invoice.BillingStreet,
+			BillingCity:     invoice.BillingCity,
+			BillingState:    invoice.BillingState,
+			BillingCode:     invoice.BillingCode,
+			BillingCountry:  invoice.BillingCountry,
+			ShippingStreet:  invoice.ShippingStreet,
+			ShippingCity:    invoice.ShippingCity,
+			ShippingState:   invoice.ShippingState,
+			ShippingCode:    invoice.ShippingCode,
+			ShippingCountry: invoice.ShippingCountry,
+		}
 	}
 
 	pdfPath, err := s.pdfService.GenerateInvoicePDF(ctx, invoice, customer)
@@ -590,16 +615,30 @@ func (s *InvoiceService) GetInvoicePDF(ctx context.Context, id uuid.UUID) (strin
 	// 2. PDF can be generated for any status (including DRAFT)
 	// The pdfService will handle adding the "DRAFT" watermark for draft invoices.
 
-	// 3. If PDF already exists and invoice is not draft, return existing path
-	if invoice.PDFPath != nil && *invoice.PDFPath != "" && invoice.Status != domain.InvoiceStatusDraft {
-		return *invoice.PDFPath, nil
-	}
+	// 3. We always regenerate for now to ensure payments/status are up to date
+	// In production, we might want to check if the PDF is older than the last updated_at
 
 	// 4. Generate PDF (or regenerate for draft invoices)
 	// Get customer for PDF generation
 	customer, err := s.rmRepo.GetCustomer(ctx, invoice.CustomerID) // Changed from s.customerRepo.GetByID
 	if err != nil || customer == nil {
-		return "", fmt.Errorf("customer not found for invoice")
+		fmt.Printf("[WARNING] Customer %s not found for GetInvoicePDF. Using placeholder.\n", invoice.CustomerID)
+		customer = &domain.CustomerRM{
+			ID:              invoice.CustomerID,
+			OrganizationID:  invoice.OrganizationID,
+			DisplayName:     "Customer",
+			CompanyName:     "Customer",
+			BillingStreet:   invoice.BillingStreet,
+			BillingCity:     invoice.BillingCity,
+			BillingState:    invoice.BillingState,
+			BillingCode:     invoice.BillingCode,
+			BillingCountry:  invoice.BillingCountry,
+			ShippingStreet:  invoice.ShippingStreet,
+			ShippingCity:    invoice.ShippingCity,
+			ShippingState:   invoice.ShippingState,
+			ShippingCode:    invoice.ShippingCode,
+			ShippingCountry: invoice.ShippingCountry,
+		}
 	}
 
 	// Generate invoice number if missing (for draft invoices)
@@ -721,24 +760,54 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 		Terms:           inv.Terms,
 	}
 
-	// Fetch Customer details from Read Model
-	if customer, err := s.rmRepo.GetCustomer(ctx, inv.CustomerID); err == nil && customer != nil {
+	// Fetch Customer details from Read Model or fallback to HTTP client
+	customer, err := s.rmRepo.GetCustomer(ctx, inv.CustomerID)
+
+	// Fallback to HTTP client if customer is missing OR has empty name (corrupted read model)
+	if (err != nil || customer == nil || customer.DisplayName == "") && s.customerClient != nil {
+		fmt.Printf("[INFO] Customer %s missing or invalid in ReadModel, fetching from Customer Service\n", inv.CustomerID)
+		remoteCustomer, remoteErr := s.customerClient.GetCustomer(ctx, inv.CustomerID)
+		if remoteErr == nil && remoteCustomer != nil {
+			customer = remoteCustomer
+			// Option: We could update the Read Model here to self-heal permanently?
+			// But for now, just returning correct data is enough.
+		}
+	}
+
+	if customer != nil {
 		res.Customer = &dto.CustomerResponse{
 			ID:          customer.ID,
 			DisplayName: customer.DisplayName,
 			CompanyName: customer.CompanyName,
 		}
+	} else {
+		// Last resort fallback using stored address if available, or "Generic Customer"
+		res.Customer = &dto.CustomerResponse{
+			ID:          inv.CustomerID,
+			DisplayName: "Generic Customer", // Still fallback, but hopefully HTTP client works
+			CompanyName: "Generic Customer",
+		}
 	}
 
-	// Fetch Contact details from Read Model
+	// Fetch Contact details from Read Model or fallback to HTTP client
+	var contact *domain.ContactRM
 	if inv.ContactID != nil {
-		if contact, err := s.rmRepo.GetContact(ctx, *inv.ContactID); err == nil && contact != nil {
-			res.Contact = &dto.ContactResponse{
-				ID:        contact.ID,
-				FirstName: contact.FirstName,
-				LastName:  contact.LastName,
-				Email:     contact.Email,
-			}
+		contact, _ = s.rmRepo.GetContact(ctx, *inv.ContactID)
+		if contact == nil && s.customerClient != nil {
+			fmt.Printf("[INFO] Contact %s not found in ReadModel, fetching from Customer Service\n", *inv.ContactID)
+			contact, _ = s.customerClient.GetContact(ctx, *inv.ContactID)
+		}
+	} else {
+		// FALLBACK: If no contact associated with invoice, try to fetch primary contact of the customer
+		contact, _ = s.rmRepo.GetPrimaryContact(ctx, inv.CustomerID)
+	}
+
+	if contact != nil {
+		res.Contact = &dto.ContactResponse{
+			ID:        contact.ID,
+			FirstName: contact.FirstName,
+			LastName:  contact.LastName,
+			Email:     contact.Email,
 		}
 	}
 

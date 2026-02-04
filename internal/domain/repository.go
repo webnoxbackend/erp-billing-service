@@ -33,6 +33,7 @@ type ReadModelRepository interface {
 	GetItem(ctx context.Context, id uuid.UUID) (*ItemRM, error)
 	SearchItems(ctx context.Context, orgID uuid.UUID, query string) ([]ItemRM, error)
 	GetContact(ctx context.Context, id uuid.UUID) (*ContactRM, error)
+	GetPrimaryContact(ctx context.Context, customerID uuid.UUID) (*ContactRM, error)
 	SearchContacts(ctx context.Context, orgID uuid.UUID, customerID uuid.UUID, query string) ([]ContactRM, error)
 }
 

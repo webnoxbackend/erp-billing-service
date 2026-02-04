@@ -13,27 +13,27 @@ import (
 
 // CreateSalesOrderRequest represents a request to create a new sales order
 type CreateSalesOrderRequest struct {
-	OrganizationID uuid.UUID              `json:"organization_id" validate:"required"`
-	CustomerID     uuid.UUID              `json:"customer_id" validate:"required"`
-	ContactID      *uuid.UUID             `json:"contact_id,omitempty"`
-	OrderDate      time.Time              `json:"order_date" validate:"required"`
-	Items          []SalesOrderItemDTO    `json:"items" validate:"required,min=1,dive"`
-	TDSAmount      float64                `json:"tds_amount"`
-	TCSAmount      float64                `json:"tcs_amount"`
-	Terms          string                 `json:"terms"`
-	Notes          string                 `json:"notes"`
+	OrganizationID uuid.UUID           `json:"organization_id" validate:"required"`
+	CustomerID     uuid.UUID           `json:"customer_id" validate:"required"`
+	ContactID      *uuid.UUID          `json:"contact_id,omitempty"`
+	OrderDate      time.Time           `json:"order_date" validate:"required"`
+	Items          []SalesOrderItemDTO `json:"items" validate:"required,min=1,dive"`
+	TDSAmount      float64             `json:"tds_amount"`
+	TCSAmount      float64             `json:"tcs_amount"`
+	Terms          string              `json:"terms"`
+	Notes          string              `json:"notes"`
 }
 
 // UpdateSalesOrderRequest represents a request to update a sales order
 type UpdateSalesOrderRequest struct {
-	CustomerID     *uuid.UUID             `json:"customer_id,omitempty"`
-	ContactID      *uuid.UUID             `json:"contact_id,omitempty"`
-	OrderDate      *time.Time             `json:"order_date,omitempty"`
-	Items          []SalesOrderItemDTO    `json:"items,omitempty"`
-	TDSAmount      *float64               `json:"tds_amount,omitempty"`
-	TCSAmount      *float64               `json:"tcs_amount,omitempty"`
-	Terms          *string                `json:"terms,omitempty"`
-	Notes          *string                `json:"notes,omitempty"`
+	CustomerID *uuid.UUID          `json:"customer_id,omitempty"`
+	ContactID  *uuid.UUID          `json:"contact_id,omitempty"`
+	OrderDate  *time.Time          `json:"order_date,omitempty"`
+	Items      []SalesOrderItemDTO `json:"items,omitempty"`
+	TDSAmount  *float64            `json:"tds_amount,omitempty"`
+	TCSAmount  *float64            `json:"tcs_amount,omitempty"`
+	Terms      *string             `json:"terms,omitempty"`
+	Notes      *string             `json:"notes,omitempty"`
 }
 
 // SalesOrderItemDTO represents a line item in a sales order
@@ -98,12 +98,12 @@ type MarkAsShippedRequest struct {
 
 // CreateSalesReturnRequest represents a request to create a new sales return
 type CreateSalesReturnRequest struct {
-	OrganizationID uuid.UUID              `json:"organization_id" validate:"required"`
-	SalesOrderID   uuid.UUID              `json:"sales_order_id" validate:"required"`
-	ReturnDate     time.Time              `json:"return_date" validate:"required"`
-	ReturnReason   string                 `json:"return_reason" validate:"required"`
-	Items          []SalesReturnItemDTO   `json:"items" validate:"required,min=1,dive"`
-	Notes          string                 `json:"notes"`
+	OrganizationID uuid.UUID            `json:"organization_id" validate:"required"`
+	SalesOrderID   uuid.UUID            `json:"sales_order_id" validate:"required"`
+	ReturnDate     time.Time            `json:"return_date" validate:"required"`
+	ReturnReason   string               `json:"return_reason" validate:"required"`
+	Items          []SalesReturnItemDTO `json:"items" validate:"required,min=1,dive"`
+	Notes          string               `json:"notes"`
 }
 
 // SalesReturnItemDTO represents a line item in a sales return
@@ -119,23 +119,23 @@ type SalesReturnItemDTO struct {
 
 // SalesReturnResponse represents a sales return response
 type SalesReturnResponse struct {
-	ID              uuid.UUID              `json:"id"`
-	OrganizationID  uuid.UUID              `json:"organization_id"`
-	SalesOrderID    uuid.UUID              `json:"sales_order_id"`
-	ReturnNumber    *string                `json:"return_number,omitempty"`
-	ReturnDate      time.Time              `json:"return_date"`
-	Status          string                 `json:"status"`
-	ReturnAmount    float64                `json:"return_amount"`
-	ReturnReason    string                 `json:"return_reason"`
-	Notes           string                 `json:"notes"`
-	ApprovedDate    *time.Time             `json:"approved_date,omitempty"`
-	ReceivedDate    *time.Time             `json:"received_date,omitempty"`
-	ReceivingNotes  string                 `json:"receiving_notes"`
-	RefundedDate    *time.Time             `json:"refunded_date,omitempty"`
-	RefundPaymentID *uuid.UUID             `json:"refund_payment_id,omitempty"`
-	Items           []SalesReturnItemDTO   `json:"items"`
-	CreatedAt       time.Time              `json:"created_at"`
-	UpdatedAt       time.Time              `json:"updated_at"`
+	ID              uuid.UUID            `json:"id"`
+	OrganizationID  uuid.UUID            `json:"organization_id"`
+	SalesOrderID    uuid.UUID            `json:"sales_order_id"`
+	ReturnNumber    *string              `json:"return_number,omitempty"`
+	ReturnDate      time.Time            `json:"return_date"`
+	Status          string               `json:"status"`
+	ReturnAmount    float64              `json:"return_amount"`
+	ReturnReason    string               `json:"return_reason"`
+	Notes           string               `json:"notes"`
+	ApprovedDate    *time.Time           `json:"approved_date,omitempty"`
+	ReceivedDate    *time.Time           `json:"received_date,omitempty"`
+	ReceivingNotes  string               `json:"receiving_notes"`
+	RefundedDate    *time.Time           `json:"refunded_date,omitempty"`
+	RefundPaymentID *uuid.UUID           `json:"refund_payment_id,omitempty"`
+	Items           []SalesReturnItemDTO `json:"items"`
+	CreatedAt       time.Time            `json:"created_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 }
 
 // SalesReturnFilters represents filters for listing sales returns

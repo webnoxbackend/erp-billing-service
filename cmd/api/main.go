@@ -12,6 +12,7 @@ import (
 	billing_http "erp-billing-service/internal/adapters/inbound/http"
 	"erp-billing-service/internal/adapters/inbound/kafka"
 	grpc_adapter "erp-billing-service/internal/adapters/outbound/grpc"
+	outbound_http "erp-billing-service/internal/adapters/outbound/http"
 	kafka_outbound "erp-billing-service/internal/adapters/outbound/kafka"
 	"erp-billing-service/internal/adapters/outbound/postgres"
 	"erp-billing-service/internal/application"
@@ -76,15 +77,27 @@ func main() {
 		log.Println("Connected to Inventory Service")
 	}
 
+	// 5.7 Initialize Customer Client (HTTP for synchronous fallback)
+	customerClient := outbound_http.NewCustomerHTTPClient(cfg.CustomerServiceURL)
+
 	// 6. Initialize Services
-	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService, inventoryClient)
+	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService, inventoryClient, customerClient)
 	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, salesOrderRepo, auditRepo, eventPublisher)
 	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, eventPublisher, inventoryClient)
 	salesReturnService := application.NewSalesReturnService(salesReturnRepo, salesOrderRepo, invoiceRepo, paymentRepo, eventPublisher, inventoryClient)
 
 	// 7. Initialize Kafka Consumers
 	eventHandler := kafka.NewEventHandler(db)
-	topics := []string{"crm.customers", "crm.contacts", "crm.addresses", "inventory.services", "inventory.parts"}
+	topics := []string{
+		"crm.customers",
+		"crm.contacts",
+		"crm.addresses",
+		"inventory.services",
+		"inventory.parts",
+		"workorder.workorders",
+		"billing.invoices",
+		"items.items", // Subscribe to item events from service and parts service
+	}
 	consumerGroup, err := shared_kafka.NewConsumerGroup(kafkaCfg, "billing-service-group", topics, eventHandler, nil)
 	if err != nil {
 		log.Fatalf("Failed to initialize Kafka consumer: %v", err)

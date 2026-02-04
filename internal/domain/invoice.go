@@ -21,29 +21,31 @@ const (
 type InvoiceStatus string
 
 const (
-	InvoiceStatusDraft   InvoiceStatus = "draft"
-	InvoiceStatusSent    InvoiceStatus = "sent"
-	InvoiceStatusPaid    InvoiceStatus = "paid"
-	InvoiceStatusOverdue InvoiceStatus = "overdue"
-	InvoiceStatusVoid    InvoiceStatus = "void"
+	InvoiceStatusDraft     InvoiceStatus = "draft"
+	InvoiceStatusSent      InvoiceStatus = "sent"
+	InvoiceStatusPartial   InvoiceStatus = "partial"
+	InvoiceStatusPaid      InvoiceStatus = "paid"
+	InvoiceStatusOverdue   InvoiceStatus = "overdue"
+	InvoiceStatusVoid      InvoiceStatus = "void"
+	InvoiceStatusCancelled InvoiceStatus = "cancelled"
 )
 
 type Invoice struct {
-	ID              uuid.UUID     `gorm:"type:uuid;primaryKey" json:"id"`
-	OrganizationID  uuid.UUID     `gorm:"type:uuid;index" json:"organization_id"`
-	CustomerID      uuid.UUID     `gorm:"type:uuid;index" json:"customer_id"`
-	ContactID       *uuid.UUID    `gorm:"type:uuid;index" json:"contact_id"`
-	OwnerID         *uuid.UUID    `gorm:"type:uuid;index" json:"owner_id"`
-	Subject         string        `gorm:"type:varchar(255)" json:"subject"`
-	
+	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index" json:"organization_id"`
+	CustomerID     uuid.UUID  `gorm:"type:uuid;index" json:"customer_id"`
+	ContactID      *uuid.UUID `gorm:"type:uuid;index" json:"contact_id"`
+	OwnerID        *uuid.UUID `gorm:"type:uuid;index" json:"owner_id"`
+	Subject        string     `gorm:"type:varchar(255)" json:"subject"`
+
 	// Invoice number is nullable - only generated when invoice is SENT
-	InvoiceNumber   *string       `gorm:"type:varchar(50);uniqueIndex" json:"invoice_number"`
-	
+	InvoiceNumber *string `gorm:"type:varchar(50);uniqueIndex" json:"invoice_number"`
+
 	// Source-agnostic fields - Billing doesn't know about FSM/CRM/Inventory internals
 	// It only stores opaque references to link back to the originating module
 	SourceSystem      SourceSystem `gorm:"type:varchar(20);default:'MANUAL';index" json:"source_system"`
 	SourceReferenceID *string      `gorm:"type:varchar(100)" json:"source_reference_id"` // e.g., "WO-12345", "DEAL-789"
-	
+
 	ReferenceNo     string        `gorm:"type:varchar(50)" json:"reference_no"`
 	SalesOrder      string        `gorm:"type:varchar(50)" json:"sales_order"`
 	PurchaseOrder   string        `gorm:"type:varchar(50)" json:"purchase_order"`
@@ -62,17 +64,17 @@ type Invoice struct {
 	Currency        string        `gorm:"type:varchar(3);default:'USD'" json:"currency"`
 	Terms           string        `gorm:"type:text" json:"terms"`
 	Notes           string        `gorm:"type:text" json:"notes"`
-	
+
 	// PDF path - populated when invoice is sent
-	PDFPath         *string       `gorm:"type:varchar(500)" json:"pdf_path"`
-	
+	PDFPath *string `gorm:"type:varchar(500)" json:"pdf_path"`
+
 	// Sales Order reference - populated when invoice is created from sales order
-	SalesOrderID    *uuid.UUID    `gorm:"type:uuid;index" json:"sales_order_id"`
-	
+	SalesOrderID *uuid.UUID `gorm:"type:uuid;index" json:"sales_order_id"`
+
 	// TDS/TCS amounts
-	TDSAmount       float64       `gorm:"type:decimal(15,2);default:0" json:"tds_amount"`
-	TCSAmount       float64       `gorm:"type:decimal(15,2);default:0" json:"tcs_amount"`
-	
+	TDSAmount float64 `gorm:"type:decimal(15,2);default:0" json:"tds_amount"`
+	TCSAmount float64 `gorm:"type:decimal(15,2);default:0" json:"tcs_amount"`
+
 	BillingStreet   string        `gorm:"type:varchar(255)" json:"billing_street"`
 	BillingCity     string        `gorm:"type:varchar(100)" json:"billing_city"`
 	BillingState    string        `gorm:"type:varchar(100)" json:"billing_state"`
@@ -104,11 +106,13 @@ func (i *Invoice) CanSend() bool {
 func (i *Invoice) CanTransitionTo(newStatus InvoiceStatus) error {
 	// Define valid transitions
 	validTransitions := map[InvoiceStatus][]InvoiceStatus{
-		InvoiceStatusDraft:   {InvoiceStatusSent, InvoiceStatusVoid},
-		InvoiceStatusSent:    {InvoiceStatusPaid, InvoiceStatusOverdue, InvoiceStatusVoid},
-		InvoiceStatusOverdue: {InvoiceStatusPaid, InvoiceStatusVoid},
-		InvoiceStatusPaid:    {InvoiceStatusVoid}, // Can void a paid invoice (refund scenario)
-		InvoiceStatusVoid:    {},                  // Terminal state
+		InvoiceStatusDraft:     {InvoiceStatusSent, InvoiceStatusVoid, InvoiceStatusCancelled},
+		InvoiceStatusSent:      {InvoiceStatusPartial, InvoiceStatusPaid, InvoiceStatusOverdue, InvoiceStatusVoid, InvoiceStatusCancelled},
+		InvoiceStatusPartial:   {InvoiceStatusPaid, InvoiceStatusOverdue, InvoiceStatusVoid, InvoiceStatusCancelled},
+		InvoiceStatusOverdue:   {InvoiceStatusPartial, InvoiceStatusPaid, InvoiceStatusVoid, InvoiceStatusCancelled},
+		InvoiceStatusPaid:      {InvoiceStatusVoid, InvoiceStatusCancelled}, // Can void/cancel a paid invoice (refund scenario)
+		InvoiceStatusVoid:      {},                                          // Terminal state
+		InvoiceStatusCancelled: {},                                          // Terminal state
 	}
 
 	allowedStatuses, exists := validTransitions[i.Status]
@@ -126,9 +130,8 @@ func (i *Invoice) CanTransitionTo(newStatus InvoiceStatus) error {
 }
 
 // CanReceivePayment returns true if the invoice can accept payments
-// Only SENT invoices can receive payments
 func (i *Invoice) CanReceivePayment() bool {
-	return i.Status == InvoiceStatusSent
+	return i.Status == InvoiceStatusSent || i.Status == InvoiceStatusPartial || i.Status == InvoiceStatusOverdue
 }
 
 // CanRefund returns true if the invoice can be refunded
@@ -138,14 +141,21 @@ func (i *Invoice) CanRefund() bool {
 }
 
 // CalculateStatus derives the invoice status based on payment amounts
-// This ensures invoice status is always consistent with payment state
 func (i *Invoice) CalculateStatus() InvoiceStatus {
+	// Use small epsilon for float comparison
+	const epsilon = 0.01
+
 	// If fully paid, status is PAID
-	if i.BalanceAmount == 0 && i.PaidAmount > 0 {
+	if i.BalanceAmount <= epsilon && i.PaidAmount > 0 {
 		return InvoiceStatusPaid
 	}
-	// Otherwise keep current status (DRAFT or SENT)
-	// Partial payments don't change the status - it remains SENT
+
+	// If some amount is paid but not all, status is PARTIAL
+	if i.PaidAmount > 0 && i.BalanceAmount > epsilon {
+		return InvoiceStatusPartial
+	}
+
+	// Otherwise keep current status (DRAFT, SENT, or OVERDUE)
 	return i.Status
 }
 
@@ -161,17 +171,17 @@ type InvoiceItem struct {
 	Discount    float64   `gorm:"type:decimal(15,2)" json:"discount"`
 	Tax         float64   `gorm:"type:decimal(15,2)" json:"tax"`
 	Total       float64   `gorm:"type:decimal(15,2)" json:"total"`
-	
+
 	// Metadata stores module-specific data without schema changes
 	// Examples:
 	// - FSM: {"technician_id": "TECH-001", "service_hours": 2.5}
 	// - CRM: {"deal_id": "DEAL-123", "sales_rep": "REP-456"}
 	// - Inventory: {"warehouse": "WH-01", "batch_number": "BATCH-789"}
 	// Billing service stores and returns this data but never interprets it
-	Metadata    json.RawMessage `gorm:"type:jsonb" json:"metadata,omitempty"`
-	
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Metadata json.RawMessage `gorm:"type:jsonb" json:"metadata,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Payment represents a payment made against an invoice

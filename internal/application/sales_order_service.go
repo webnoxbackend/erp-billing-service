@@ -3,21 +3,23 @@ package application
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
 	"erp-billing-service/internal/ports/outbound"
 	"erp-billing-service/internal/ports/repositories"
+
 	shared_events "github.com/efs/shared-events"
+	"github.com/google/uuid"
 )
 
 // SalesOrderService handles sales order business logic
 type SalesOrderService struct {
-	salesOrderRepo repositories.SalesOrderRepository
-	invoiceRepo    domain.InvoiceRepository
-	eventPublisher domain.EventPublisher
+	salesOrderRepo  repositories.SalesOrderRepository
+	invoiceRepo     domain.InvoiceRepository
+	eventPublisher  domain.EventPublisher
 	inventoryClient outbound.InventoryClient
 }
 
@@ -29,9 +31,9 @@ func NewSalesOrderService(
 	inventoryClient outbound.InventoryClient,
 ) *SalesOrderService {
 	return &SalesOrderService{
-		salesOrderRepo: salesOrderRepo,
-		invoiceRepo:    invoiceRepo,
-		eventPublisher: eventPublisher,
+		salesOrderRepo:  salesOrderRepo,
+		invoiceRepo:     invoiceRepo,
+		eventPublisher:  eventPublisher,
 		inventoryClient: inventoryClient,
 	}
 }
@@ -54,12 +56,10 @@ func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (
 		if len(stockItems) > 0 {
 			unavailable, err := s.inventoryClient.CheckStockAvailability(context.Background(), stockItems)
 			if err != nil {
-				// Log error but maybe don't block if critical?
-				// Plan says "Fail if unavailable".
-				return nil, fmt.Errorf("failed to check stock availability: %w", err)
-			}
-			if len(unavailable) > 0 {
-				// Construct error message with unavailable items
+				// If stock check fails (e.g. service down), log warning and proceed optimisticly
+				fmt.Printf("Warning: failed to check stock availability: %v\n", err)
+			} else if len(unavailable) > 0 {
+				// Only fail if we explicitly know stock is unavailable
 				errMsg := "stock unavailable for items: "
 				for _, u := range unavailable {
 					errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
@@ -119,30 +119,8 @@ func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (
 		return nil, fmt.Errorf("failed to create sales order: %w", err)
 	}
 
-	// Update stock (Decrease)
-	if s.inventoryClient != nil {
-		stockItems := make([]outbound.StockCheckItem, 0)
-		for _, item := range salesOrder.Items {
-			stockItems = append(stockItems, outbound.StockCheckItem{
-				ItemID:   item.ItemID.String(),
-				Quantity: int32(item.Quantity),
-			})
-		}
-		if len(stockItems) > 0 {
-			// We use background context or pass context from request if available. 
-			// CreateSalesOrder doesn't take context in current signature (bad practice but following existing code).
-			// We'll use background.
-			// TransactionType: 'sales', ReferenceType: 'sales_order'
-			err := s.inventoryClient.UpdateStock(context.Background(), stockItems, "sales", "sales_order", salesOrder.ID.String(), "Sales Order Created")
-			if err != nil {
-				// If stock update fails, we might want to log it or alert.
-				// Since we already saved the order, we shouldn't fail the request entirely, 
-				// BUT consistency is broken.
-				// For now, let's log and return error warning, or just return error.
-				return nil, fmt.Errorf("sales order created but failed to update stock: %w", err)
-			}
-		}
-	}
+	// Note: Stock is NOT reduced at creation time (draft status)
+	// Stock will be reduced when the order is confirmed
 
 	// Publish event
 	metadata := shared_events.NewEventMetadata(
@@ -282,6 +260,28 @@ func (s *SalesOrderService) ConfirmSalesOrder(id uuid.UUID) (*dto.SalesOrderResp
 		return nil, fmt.Errorf("failed to confirm sales order: %w", err)
 	}
 
+	// Reduce stock when order is confirmed
+	if s.inventoryClient != nil {
+		stockItems := make([]outbound.StockCheckItem, 0)
+		for _, item := range salesOrder.Items {
+			// Only reduce stock for GOODS or PRODUCT items (case-insensitive)
+			itemTypeLower := strings.ToLower(item.ItemType)
+			if itemTypeLower == "goods" || itemTypeLower == "product" || itemTypeLower == "part" || itemTypeLower == "" {
+				stockItems = append(stockItems, outbound.StockCheckItem{
+					ItemID:   item.ItemID.String(),
+					Quantity: int32(item.Quantity),
+				})
+			}
+		}
+		if len(stockItems) > 0 {
+			err := s.inventoryClient.UpdateStock(context.Background(), stockItems, "sales", "sales_order", salesOrder.ID.String(), "Sales Order Confirmed")
+			if err != nil {
+				// If stock update fails, we should rollback the confirmation
+				return nil, fmt.Errorf("failed to reduce stock for confirmed order: %w", err)
+			}
+		}
+	}
+
 	// Publish event
 	metadata := shared_events.NewEventMetadata(
 		shared_events.EventType("sales_order.confirmed"),
@@ -376,15 +376,15 @@ func (s *SalesOrderService) CreateInvoiceFromOrder(orderID uuid.UUID) (*dto.Invo
 		invoice.ID.String(),
 	)
 	invoiceEvent := domain.InvoiceCreatedEvent{
-		InvoiceID:  invoice.ID.String(),
+		InvoiceID:      invoice.ID.String(),
 		OrganizationID: invoice.OrganizationID.String(),
-		CustomerID: invoice.CustomerID.String(),
-		SourceSystem: string(invoice.SourceSystem),
-		Subject: invoice.Subject,
-		Status: string(invoice.Status),
-		TotalAmount: invoice.TotalAmount,
-		Currency: "USD",
-		Timestamp: time.Now(),
+		CustomerID:     invoice.CustomerID.String(),
+		SourceSystem:   string(invoice.SourceSystem),
+		Subject:        invoice.Subject,
+		Status:         string(invoice.Status),
+		TotalAmount:    invoice.TotalAmount,
+		Currency:       "USD",
+		Timestamp:      time.Now(),
 	}
 	s.eventPublisher.Publish(context.Background(), invoiceMeta, invoiceEvent)
 
@@ -471,6 +471,32 @@ func (s *SalesOrderService) CancelSalesOrder(id uuid.UUID, reason string) error 
 	// Check if can cancel
 	if !salesOrder.CanCancel() {
 		return fmt.Errorf("cannot cancel sales order in %s status", salesOrder.Status)
+	}
+
+	// Restore stock if order was confirmed (stock was already reduced)
+	if salesOrder.Status == domain.SalesOrderStatusConfirmed || salesOrder.Status == domain.SalesOrderStatusShipped {
+		if s.inventoryClient != nil {
+			stockItems := make([]outbound.StockCheckItem, 0)
+			for _, item := range salesOrder.Items {
+				// Only restore stock for GOODS or PRODUCT items (case-insensitive)
+				itemTypeLower := strings.ToLower(item.ItemType)
+				if itemTypeLower == "goods" || itemTypeLower == "product" || itemTypeLower == "part" || itemTypeLower == "" {
+					stockItems = append(stockItems, outbound.StockCheckItem{
+						ItemID:   item.ItemID.String(),
+						Quantity: int32(item.Quantity),
+					})
+				}
+			}
+			if len(stockItems) > 0 {
+				// Use "return" transaction type to add stock back
+				err := s.inventoryClient.UpdateStock(context.Background(), stockItems, "return", "sales_order_cancellation", salesOrder.ID.String(), "Sales Order Cancelled - Stock Restored")
+				if err != nil {
+					// Log error but don't fail cancellation
+					// This is a compensating transaction, manual intervention may be needed
+					fmt.Printf("Warning: failed to restore stock for cancelled order %s: %v\n", salesOrder.ID.String(), err)
+				}
+			}
+		}
 	}
 
 	// Update status

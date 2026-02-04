@@ -20,6 +20,7 @@ type Config struct {
 	HTTPPort                string
 	InventoryServiceURL     string
 	InventoryServiceHTTPURL string
+	CustomerServiceURL      string
 }
 
 // Load loads configuration from environment variables
@@ -44,6 +45,7 @@ func Load() (*Config, error) {
 		RefreshTokenExpiry:      refreshTokenExpiry,
 		InventoryServiceURL:     getEnv("INVENTORY_SERVICE_URL", "serviceandparts-service:50057"),
 		InventoryServiceHTTPURL: getEnv("INVENTORY_SERVICE_HTTP_URL", "http://serviceandparts-service:8087"),
+		CustomerServiceURL:      getEnv("CUSTOMER_SERVICE_URL", "http://customer-service:8084"),
 	}, nil
 }
 

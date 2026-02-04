@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"erp-billing-service/internal/application"
@@ -24,6 +25,7 @@ func NewInvoiceHandler(service *application.InvoiceService) *InvoiceHandler {
 func (h *InvoiceHandler) CreateInvoice(w http.ResponseWriter, r *http.Request) {
 	var req dto.CreateInvoiceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fmt.Printf("[ERROR] Failed to decode invoice request: %v\n", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -32,13 +34,23 @@ func (h *InvoiceHandler) CreateInvoice(w http.ResponseWriter, r *http.Request) {
 	orgIDStr := r.Header.Get("X-Organization-ID")
 	orgID, _ := uuid.Parse(orgIDStr)
 	if orgID == uuid.Nil {
-		// Default for testing if header is missing
-		orgID = uuid.New()
+		// Default to a zero UUID if missing, log it for debugging
+		// Avoid generating random new UUIDs as that makes data unreachable
+		fmt.Printf("[DEBUG] X-Organization-ID header missing in CreateInvoice, using Nil UUID\n")
 	}
 
+	fmt.Printf("[DEBUG] Creating invoice with orgID: %s, request: %+v\n", orgID, req)
 	invoice, err := h.service.CreateInvoice(r.Context(), orgID, req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fmt.Printf("[ERROR] Failed to create invoice: %v\n", err)
+		// Check if it's a validation error (stock unavailable, etc.)
+		if strings.Contains(err.Error(), "stock unavailable") ||
+			strings.Contains(err.Error(), "validation") ||
+			strings.Contains(err.Error(), "invalid") {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -92,7 +104,8 @@ func (h *InvoiceHandler) ListInvoices(w http.ResponseWriter, r *http.Request) {
 		var sourceSystem domain.SourceSystem
 		switch moduleFilter {
 		case "FSM":
-			sourceSystem = domain.SourceSystemFSM
+			// For FSM/Billing dashboard, we show both FSM-specific and MANUAL invoices
+			result, err = h.service.ListInvoices(r.Context(), orgID)
 		case "CRM":
 			sourceSystem = domain.SourceSystemCRM
 		case "INVENTORY", "IMS":
@@ -152,7 +165,8 @@ func (h *InvoiceHandler) DeleteInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Invoice deleted successfully"})
 }
 
 func (h *InvoiceHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
