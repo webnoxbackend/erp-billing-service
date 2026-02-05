@@ -27,13 +27,21 @@ FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates libc6-compat librdkafka
 
-WORKDIR /root/
+# Create a non-root user
+RUN adduser -D -u 10001 appuser
+
+WORKDIR /home/appuser
 
 # Copy the binary from builder
 COPY --from=builder /app/erp-billing-service/billing-service .
 
 # Copy migrations if needed
 COPY --from=builder /app/erp-billing-service/migrations ./migrations
+
+# Set ownership to non-root user
+RUN chown -R appuser:appuser .
+
+USER appuser
 
 # Expose ports
 EXPOSE 8088 50051
