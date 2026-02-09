@@ -66,13 +66,13 @@ go run cmd/server/main.go
 ### Check gRPC Server
 
 ```bash
-grpcurl -plaintext localhost:50051 list
+grpcurl -plaintext 192.168.0.31:50051 list
 ```
 
 ### Check HTTP Server
 
 ```bash
-curl http://localhost:8081/api/v1/examples
+curl http://192.168.0.31:8081/api/v1/examples
 ```
 
 ## Common Commands
