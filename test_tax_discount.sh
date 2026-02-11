@@ -9,7 +9,7 @@ echo "=========================================="
 echo ""
 
 # API Base URL
-API_URL="http://192.168.0.31:8080/api/v1/billing"
+API_URL="http://192.168.0.111:8080/api/v1/billing"
 
 # Colors for output
 GREEN='\033[0;32m'

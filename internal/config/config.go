@@ -36,7 +36,7 @@ func Load() (*Config, error) {
 
 	return &Config{
 		DatabaseURL:             getEnv("DATABASE_URL", ""),
-		RedisURL:                getEnv("REDIS_URL", "192.168.0.31:6379"),
+		RedisURL:                getEnv("REDIS_URL", "192.168.0.111:6379"),
 		RedisPassword:           getEnv("REDIS_PASSWORD", ""),
 		GRPCPort:                getEnv("GRPC_PORT", "50051"),
 		HTTPPort:                getEnv("HTTP_PORT", "8088"),

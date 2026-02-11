@@ -6,7 +6,7 @@
 echo "🔧 Running Billing Service Database Migration..."
 
 # Database connection details (update these if needed)
-DB_HOST="192.168.0.31"
+DB_HOST="192.168.0.111"
 DB_PORT="5432"
 DB_USER="postgres"
 DB_NAME="billing_db"

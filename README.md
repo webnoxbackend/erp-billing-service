@@ -100,8 +100,8 @@ cp .env.example .env
 Edit `.env`:
 
 ```env
-DATABASE_URL=postgres://postgres:postgres@192.168.0.31:5433/example_db?sslmode=disable
-REDIS_URL=192.168.0.31:6380
+DATABASE_URL=postgres://postgres:postgres@192.168.0.111:5433/example_db?sslmode=disable
+REDIS_URL=192.168.0.111:6380
 GRPC_PORT=50051
 HTTP_PORT=8081
 JWT_SECRET=your-secret-key-change-in-production
@@ -135,7 +135,7 @@ import (
     proto "example-service/example-service/proto"
 )
 
-conn, _ := grpc.Dial("192.168.0.31:50051", grpc.WithInsecure())
+conn, _ := grpc.Dial("192.168.0.111:50051", grpc.WithInsecure())
 client := proto.NewExampleServiceClient(conn)
 
 // Create Example
@@ -148,23 +148,23 @@ resp, _ := client.CreateExample(ctx, &proto.CreateExampleRequest{
 
 ```bash
 # Create Example
-curl -X POST http://192.168.0.31:8081/api/v1/examples \
+curl -X POST http://192.168.0.111:8081/api/v1/examples \
   -H "Content-Type: application/json" \
   -d '{"name": "Example Name"}'
 
 # Get Example
-curl http://192.168.0.31:8081/api/v1/examples/1
+curl http://192.168.0.111:8081/api/v1/examples/1
 
 # List Examples
-curl http://192.168.0.31:8081/api/v1/examples
+curl http://192.168.0.111:8081/api/v1/examples
 
 # Update Example
-curl -X PUT http://192.168.0.31:8081/api/v1/examples/1 \
+curl -X PUT http://192.168.0.111:8081/api/v1/examples/1 \
   -H "Content-Type: application/json" \
   -d '{"name": "Updated Name", "status": "active"}'
 
 # Delete Example
-curl -X DELETE http://192.168.0.31:8081/api/v1/examples/1
+curl -X DELETE http://192.168.0.111:8081/api/v1/examples/1
 ```
 
 ## Architecture Layers
