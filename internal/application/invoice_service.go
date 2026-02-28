@@ -740,8 +740,10 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 		OwnerID:         inv.OwnerID,
 		CustomerID:      inv.CustomerID,
 		ContactID:       inv.ContactID,
-		InvoiceDate:     inv.InvoiceDate,
-		DueDate:         inv.DueDate,
+		InvoiceDate:     ConvertToOrgTZValue(ctx, inv.InvoiceDate, inv.OrganizationID, s.rmRepo),
+		DueDate:         ConvertToOrgTZValue(ctx, inv.DueDate, inv.OrganizationID, s.rmRepo),
+		CreatedAt:       ConvertToOrgTZValue(ctx, inv.CreatedAt, inv.OrganizationID, s.rmRepo),
+		UpdatedAt:       ConvertToOrgTZValue(ctx, inv.UpdatedAt, inv.OrganizationID, s.rmRepo),
 
 		// PDF path
 		PDFPath: inv.PDFPath,
@@ -878,6 +880,25 @@ func (s *InvoiceService) UpdateStatus(ctx context.Context, id uuid.UUID, newStat
 	return nil
 }
 
-func (s *InvoiceService) GetAuditLogs(ctx context.Context, invoiceID uuid.UUID) ([]domain.InvoiceAuditLog, error) {
-	return s.auditRepo.ListByInvoiceID(ctx, invoiceID)
+func (s *InvoiceService) GetAuditLogs(ctx context.Context, invoiceID uuid.UUID) ([]dto.InvoiceAuditLogResponse, error) {
+	logs, err := s.auditRepo.ListByInvoiceID(ctx, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+
+	responses := make([]dto.InvoiceAuditLogResponse, len(logs))
+	for i, log := range logs {
+		responses[i] = dto.InvoiceAuditLogResponse{
+			ID:          log.ID,
+			InvoiceID:   log.InvoiceID,
+			Action:      log.Action,
+			OldStatus:   log.OldStatus,
+			NewStatus:   log.NewStatus,
+			Notes:       log.Notes,
+			PerformedBy: log.PerformedBy,
+			CreatedAt:   ConvertToOrgTZValue(ctx, log.CreatedAt, log.OrganizationID, s.rmRepo),
+		}
+	}
+
+	return responses, nil
 }

@@ -88,6 +88,9 @@ func AutoMigrate(db *gorm.DB) error {
 		db.Exec("DROP TABLE IF EXISTS sales_orders CASCADE")
 	}
 
+	// Rename organization_read_models if it exists
+	db.Exec("ALTER TABLE IF EXISTS organization_read_models RENAME TO organization_readonly")
+
 	// Auto migrate all models
 	err := db.AutoMigrate(
 		&domain.Invoice{},
@@ -104,6 +107,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&domain.SalesOrderItem{},
 		&domain.SalesReturn{},
 		&domain.SalesReturnItem{},
+		&domain.OrganizationRM{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)

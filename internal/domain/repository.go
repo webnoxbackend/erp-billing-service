@@ -35,6 +35,9 @@ type ReadModelRepository interface {
 	GetContact(ctx context.Context, id uuid.UUID) (*ContactRM, error)
 	GetPrimaryContact(ctx context.Context, customerID uuid.UUID) (*ContactRM, error)
 	SearchContacts(ctx context.Context, orgID uuid.UUID, customerID uuid.UUID, query string) ([]ContactRM, error)
+	GetOrganization(ctx context.Context, id uuid.UUID) (*OrganizationRM, error)
+	SearchWorkOrders(ctx context.Context, orgID uuid.UUID, query string) ([]WorkOrderRM, error)
+	GetWorkOrderByID(ctx context.Context, id uuid.UUID) (*WorkOrderRM, error)
 }
 
 type AuditLogRepository interface {

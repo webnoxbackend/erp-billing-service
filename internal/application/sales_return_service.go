@@ -20,6 +20,7 @@ type SalesReturnService struct {
 	salesOrderRepo  repositories.SalesOrderRepository
 	invoiceRepo     domain.InvoiceRepository
 	paymentRepo     domain.PaymentRepository
+	rmRepo          domain.ReadModelRepository
 	eventPublisher  domain.EventPublisher
 	inventoryClient outbound.InventoryClient
 }
@@ -30,6 +31,7 @@ func NewSalesReturnService(
 	salesOrderRepo repositories.SalesOrderRepository,
 	invoiceRepo domain.InvoiceRepository,
 	paymentRepo domain.PaymentRepository,
+	rmRepo domain.ReadModelRepository,
 	eventPublisher domain.EventPublisher,
 	inventoryClient outbound.InventoryClient,
 ) *SalesReturnService {
@@ -38,6 +40,7 @@ func NewSalesReturnService(
 		salesOrderRepo:  salesOrderRepo,
 		invoiceRepo:     invoiceRepo,
 		paymentRepo:     paymentRepo,
+		rmRepo:          rmRepo,
 		eventPublisher:  eventPublisher,
 		inventoryClient: inventoryClient,
 	}
@@ -366,18 +369,18 @@ func (s *SalesReturnService) toSalesReturnResponse(salesReturn *domain.SalesRetu
 		OrganizationID:  salesReturn.OrganizationID,
 		SalesOrderID:    salesReturn.SalesOrderID,
 		ReturnNumber:    salesReturn.ReturnNumber,
-		ReturnDate:      salesReturn.ReturnDate,
+		ReturnDate:      ConvertToOrgTZValue(context.Background(), salesReturn.ReturnDate, salesReturn.OrganizationID, s.rmRepo),
 		Status:          string(salesReturn.Status),
 		ReturnAmount:    salesReturn.ReturnAmount,
 		ReturnReason:    salesReturn.ReturnReason,
 		Notes:           salesReturn.Notes,
-		ApprovedDate:    salesReturn.ApprovedDate,
-		ReceivedDate:    salesReturn.ReceivedDate,
+		ApprovedDate:    ConvertToOrgTZ(context.Background(), salesReturn.ApprovedDate, salesReturn.OrganizationID, s.rmRepo),
+		ReceivedDate:    ConvertToOrgTZ(context.Background(), salesReturn.ReceivedDate, salesReturn.OrganizationID, s.rmRepo),
 		ReceivingNotes:  salesReturn.ReceivingNotes,
-		RefundedDate:    salesReturn.RefundedDate,
+		RefundedDate:    ConvertToOrgTZ(context.Background(), salesReturn.RefundedDate, salesReturn.OrganizationID, s.rmRepo),
 		RefundPaymentID: salesReturn.RefundPaymentID,
 		Items:           items,
-		CreatedAt:       salesReturn.CreatedAt,
-		UpdatedAt:       salesReturn.UpdatedAt,
+		CreatedAt:       ConvertToOrgTZValue(context.Background(), salesReturn.CreatedAt, salesReturn.OrganizationID, s.rmRepo),
+		UpdatedAt:       ConvertToOrgTZValue(context.Background(), salesReturn.UpdatedAt, salesReturn.OrganizationID, s.rmRepo),
 	}
 }

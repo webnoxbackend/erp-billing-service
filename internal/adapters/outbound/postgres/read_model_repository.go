@@ -143,3 +143,35 @@ func (r *ReadModelRepository) SearchContacts(ctx context.Context, orgID uuid.UUI
 	err := db.Where("(first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?)", q, q, q).Limit(20).Find(&res).Error
 	return res, err
 }
+
+func (r *ReadModelRepository) GetOrganization(ctx context.Context, id uuid.UUID) (*domain.OrganizationRM, error) {
+	var rm domain.OrganizationRM
+	err := r.db.WithContext(ctx).First(&rm, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &rm, nil
+}
+
+func (r *ReadModelRepository) SearchWorkOrders(ctx context.Context, orgID uuid.UUID, query string) ([]domain.WorkOrderRM, error) {
+	var res []domain.WorkOrderRM
+	db := r.db.WithContext(ctx).Where("organization_id = ?", orgID)
+	if query != "" {
+		q := "%" + query + "%"
+		db = db.Where("summary ILIKE ?", q)
+	}
+	err := db.Order("updated_at DESC").Limit(30).Find(&res).Error
+	return res, err
+}
+
+func (r *ReadModelRepository) GetWorkOrderByID(ctx context.Context, id uuid.UUID) (*domain.WorkOrderRM, error) {
+	var rm domain.WorkOrderRM
+	err := r.db.WithContext(ctx).
+		Preload("ServiceLines").
+		Preload("PartLines").
+		First(&rm, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &rm, nil
+}

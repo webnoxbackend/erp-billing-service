@@ -51,6 +51,8 @@ func (h *EventHandler) Handle(ctx context.Context, data []byte) error {
 			return h.handleItemEvent(tx, baseEvent)
 		case shared_events.AggregateWorkOrder:
 			return h.handleWorkOrderEvent(tx, baseEvent)
+		case shared_events.AggregateOrganization:
+			return h.handleOrganizationEvent(tx, baseEvent)
 		case "invoice":
 			return h.handleInvoiceEvent(tx, baseEvent)
 		default:
@@ -349,9 +351,59 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 			UpdatedAt:      event.Metadata.OccurredAt,
 		}
 
-		return tx.Clauses(clause.OnConflict{
+		if err := tx.Clauses(clause.OnConflict{
 			UpdateAll: true,
-		}).Create(&rm).Error
+		}).Create(&rm).Error; err != nil {
+			return err
+		}
+
+		// Handle service lines
+		for _, line := range payload.ServiceLines {
+			lineID, _ := uuid.Parse(line.ID)
+			var serviceID *uuid.UUID
+			if line.ServiceID != nil {
+				parsed, _ := uuid.Parse(*line.ServiceID)
+				serviceID = &parsed
+			}
+			sl := domain.WorkOrderServiceLineRM{
+				ID:          lineID,
+				WorkOrderID: id,
+				ServiceID:   serviceID,
+				Description: line.Description,
+				Quantity:    line.Quantity,
+				Unit:        line.Unit,
+				ListPrice:   line.ListPrice,
+				LineAmount:  line.LineAmount,
+			}
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&sl).Error; err != nil {
+				return err
+			}
+		}
+
+		// Handle part lines
+		for _, line := range payload.PartLines {
+			lineID, _ := uuid.Parse(line.ID)
+			var partID *uuid.UUID
+			if line.PartID != nil {
+				parsed, _ := uuid.Parse(*line.PartID)
+				partID = &parsed
+			}
+			pl := domain.WorkOrderPartLineRM{
+				ID:          lineID,
+				WorkOrderID: id,
+				PartID:      partID,
+				Description: line.Description,
+				Quantity:    line.Quantity,
+				Unit:        line.Unit,
+				ListPrice:   line.ListPrice,
+				LineAmount:  line.LineAmount,
+			}
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&pl).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
 
 	case shared_events.WorkOrderUpdated:
 		var payload shared_events.WorkOrderUpdatedPayload
@@ -376,7 +428,66 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 		}
 		updates["updated_at"] = event.Metadata.OccurredAt
 
-		return tx.Model(&domain.WorkOrderRM{}).Where("id = ?", id).Updates(updates).Error
+		if err := tx.Model(&domain.WorkOrderRM{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return err
+		}
+
+		// If line items are provided, replace existing ones
+		if len(payload.ServiceLines) > 0 {
+			if err := tx.Where("work_order_id = ?", id).Delete(&domain.WorkOrderServiceLineRM{}).Error; err != nil {
+				return err
+			}
+			for _, line := range payload.ServiceLines {
+				lineID, _ := uuid.Parse(line.ID)
+				var serviceID *uuid.UUID
+				if line.ServiceID != nil {
+					parsed, _ := uuid.Parse(*line.ServiceID)
+					serviceID = &parsed
+				}
+				sl := domain.WorkOrderServiceLineRM{
+					ID:          lineID,
+					WorkOrderID: id,
+					ServiceID:   serviceID,
+					Description: line.Description,
+					Quantity:    line.Quantity,
+					Unit:        line.Unit,
+					ListPrice:   line.ListPrice,
+					LineAmount:  line.LineAmount,
+				}
+				if err := tx.Create(&sl).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		if len(payload.PartLines) > 0 {
+			if err := tx.Where("work_order_id = ?", id).Delete(&domain.WorkOrderPartLineRM{}).Error; err != nil {
+				return err
+			}
+			for _, line := range payload.PartLines {
+				lineID, _ := uuid.Parse(line.ID)
+				var partID *uuid.UUID
+				if line.PartID != nil {
+					parsed, _ := uuid.Parse(*line.PartID)
+					partID = &parsed
+				}
+				pl := domain.WorkOrderPartLineRM{
+					ID:          lineID,
+					WorkOrderID: id,
+					PartID:      partID,
+					Description: line.Description,
+					Quantity:    line.Quantity,
+					Unit:        line.Unit,
+					ListPrice:   line.ListPrice,
+					LineAmount:  line.LineAmount,
+				}
+				if err := tx.Create(&pl).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
 
 	case shared_events.WorkOrderDeleted:
 		var payload shared_events.WorkOrderDeletedPayload
@@ -629,6 +740,114 @@ func (h *EventHandler) handleItemEvent(tx *gorm.DB, event *shared_events.BaseEve
 		}
 		id, _ := uuid.Parse(payload.ItemID)
 		return tx.Delete(&domain.ItemRM{}, "id = ?", id).Error
+
+	default:
+		return nil
+	}
+}
+
+func (h *EventHandler) handleOrganizationEvent(tx *gorm.DB, event *shared_events.BaseEvent) error {
+	switch event.Metadata.EventType {
+	case shared_events.OrganizationCreated:
+		var payload shared_events.OrganizationCreatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		id, _ := uuid.Parse(payload.OrganizationID)
+
+		rm := domain.OrganizationRM{
+			ID:               id,
+			ProfileID:        payload.ProfileID,
+			OrganizationName: payload.Name,
+			OrganizationType: payload.OrganizationType,
+			Address:          payload.Address,
+			City:             payload.City,
+			State:            payload.State,
+			ZipCode:          payload.ZipCode,
+			Country:          payload.Country,
+			Phone:            payload.Phone,
+			Website:          payload.Domain,
+			Currency:         payload.Currency,
+			Timezone:         payload.Timezone,
+			IsActive:         payload.Status == "active",
+			UpdatedAt:        event.Metadata.OccurredAt,
+		}
+
+		return tx.Clauses(clause.OnConflict{
+			UpdateAll: true,
+		}).Create(&rm).Error
+
+	case shared_events.OrganizationUpdated:
+		var payload shared_events.OrganizationUpdatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		id, _ := uuid.Parse(payload.OrganizationID)
+
+		updates := make(map[string]interface{})
+
+		isUpdated := func(field string) bool {
+			for _, f := range payload.UpdatedFields {
+				if f == field {
+					return true
+				}
+			}
+			return false
+		}
+
+		if payload.Name != "" || isUpdated("name") {
+			updates["organization_name"] = payload.Name
+		}
+		if payload.ProfileID != "" || isUpdated("profile_id") {
+			updates["profile_id"] = payload.ProfileID
+		}
+		if payload.OrganizationType != "" || isUpdated("organization_type") {
+			updates["organization_type"] = payload.OrganizationType
+		}
+		if payload.Address != "" || isUpdated("address") {
+			updates["address"] = payload.Address
+		}
+		if payload.City != "" || isUpdated("city") {
+			updates["city"] = payload.City
+		}
+		if payload.State != "" || isUpdated("state") {
+			updates["state"] = payload.State
+		}
+		if payload.ZipCode != "" || isUpdated("zip_code") {
+			updates["zip_code"] = payload.ZipCode
+		}
+		if payload.Country != "" || isUpdated("country") {
+			updates["country"] = payload.Country
+		}
+		if payload.Phone != "" || isUpdated("phone") {
+			updates["phone"] = payload.Phone
+		}
+		if payload.Domain != "" || isUpdated("domain") {
+			updates["website"] = payload.Domain
+		}
+		if payload.Currency != "" || isUpdated("currency") {
+			updates["currency"] = payload.Currency
+		}
+		if payload.Timezone != "" || isUpdated("timezone") {
+			updates["timezone"] = payload.Timezone
+		}
+		if payload.Status != "" || isUpdated("status") {
+			updates["is_active"] = payload.Status == "active"
+		}
+
+		updates["updated_at"] = event.Metadata.OccurredAt
+
+		return tx.Model(&domain.OrganizationRM{}).Where("id = ?", id).Updates(updates).Error
+
+	case shared_events.OrganizationDeleted:
+		var payload shared_events.OrganizationDeletedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+		id, _ := uuid.Parse(payload.OrganizationID)
+		return tx.Delete(&domain.OrganizationRM{}, "id = ?", id).Error
 
 	default:
 		return nil

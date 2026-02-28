@@ -96,6 +96,10 @@ type WorkOrderRM struct {
 	Adjustment     float64    `gorm:"type:decimal(15,2)" json:"adjustment"`
 	GrandTotal     float64    `gorm:"type:decimal(15,2)" json:"grand_total"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+
+	// Associations (preloaded on detail fetch)
+	ServiceLines []WorkOrderServiceLineRM `gorm:"foreignKey:WorkOrderID" json:"service_lines,omitempty"`
+	PartLines    []WorkOrderPartLineRM    `gorm:"foreignKey:WorkOrderID" json:"part_lines,omitempty"`
 }
 
 // WorkOrderServiceLineRM represents a read-optimized version of a Work Order Service Line
@@ -120,4 +124,27 @@ type WorkOrderPartLineRM struct {
 	Unit        string     `json:"unit"`
 	ListPrice   float64    `gorm:"type:decimal(15,2)" json:"list_price"`
 	LineAmount  float64    `gorm:"type:decimal(15,2)" json:"line_amount"`
+}
+
+// OrganizationRM represents a read-optimized version of an Organization
+type OrganizationRM struct {
+	ID               uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	ProfileID        string    `json:"profile_id"`
+	OrganizationName string    `json:"organization_name"`
+	OrganizationType string    `json:"organization_type"`
+	Address          string    `json:"address"`
+	City             string    `json:"city"`
+	State            string    `json:"state"`
+	ZipCode          string    `json:"zip_code"`
+	Country          string    `json:"country"`
+	Phone            string    `json:"phone"`
+	Website          string    `json:"website"`
+	Currency         string    `json:"currency"`
+	Timezone         string    `json:"timezone"`
+	IsActive         bool      `json:"is_active"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+func (OrganizationRM) TableName() string {
+	return "organization_readonly"
 }
