@@ -82,9 +82,9 @@ func main() {
 
 	// 6. Initialize Services
 	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService, inventoryClient, customerClient)
-	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, salesOrderRepo, auditRepo, eventPublisher)
-	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, eventPublisher, inventoryClient, customerClient)
-	salesReturnService := application.NewSalesReturnService(salesReturnRepo, salesOrderRepo, invoiceRepo, paymentRepo, eventPublisher, inventoryClient)
+	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, salesOrderRepo, rmRepo, auditRepo, eventPublisher)
+	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, rmRepo, eventPublisher, inventoryClient, customerClient)
+	salesReturnService := application.NewSalesReturnService(salesReturnRepo, salesOrderRepo, invoiceRepo, paymentRepo, rmRepo, eventPublisher, inventoryClient)
 
 	// 7. Initialize Kafka Consumers
 	eventHandler := kafka.NewEventHandler(db)
@@ -94,9 +94,11 @@ func main() {
 		"crm.addresses",
 		"inventory.services",
 		"inventory.parts",
-		"workorder.workorders",
 		"billing.invoices",
 		"items.items", // Subscribe to item events from service and parts service
+		"org.organizations",
+		"workorder.workorders",
+		"workorder.estimates",
 	}
 	consumerGroup, err := shared_kafka.NewConsumerGroup(kafkaCfg, "billing-service-group", topics, eventHandler, nil)
 	if err != nil {
@@ -144,6 +146,10 @@ func main() {
 	api.HandleFunc("/billing/search/customers", rmHandler.SearchCustomers).Methods("GET")
 	api.HandleFunc("/billing/search/items", rmHandler.SearchItems).Methods("GET")
 	api.HandleFunc("/billing/search/contacts", rmHandler.SearchContacts).Methods("GET")
+
+	// Work Order Routes (served from billing service's local work_order_rms replica)
+	api.HandleFunc("/billing/work-orders", rmHandler.SearchWorkOrders).Methods("GET")
+	api.HandleFunc("/billing/work-orders/{id}", rmHandler.GetWorkOrder).Methods("GET")
 
 	// Sales Order Routes
 	api.HandleFunc("/billing/sales-orders", salesOrderHandler.CreateSalesOrder).Methods("POST")

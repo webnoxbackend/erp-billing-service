@@ -6,7 +6,7 @@ services:
     container_name: erp-billing-service
     ports:
       - "8088:8088"
-      - "50088:50051"
+      - "51088:50051"
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432

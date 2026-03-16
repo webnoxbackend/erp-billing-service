@@ -13,13 +13,13 @@ import (
 
 	shared_events "github.com/efs/shared-events"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // SalesOrderService handles sales order business logic
 type SalesOrderService struct {
 	salesOrderRepo  repositories.SalesOrderRepository
 	invoiceRepo     domain.InvoiceRepository
+	rmRepo          domain.ReadModelRepository
 	eventPublisher  domain.EventPublisher
 	inventoryClient outbound.InventoryClient
 	customerClient  outbound.CustomerClient
@@ -29,6 +29,7 @@ type SalesOrderService struct {
 func NewSalesOrderService(
 	salesOrderRepo repositories.SalesOrderRepository,
 	invoiceRepo domain.InvoiceRepository,
+	rmRepo domain.ReadModelRepository,
 	eventPublisher domain.EventPublisher,
 	inventoryClient outbound.InventoryClient,
 	customerClient outbound.CustomerClient,
@@ -36,6 +37,7 @@ func NewSalesOrderService(
 	return &SalesOrderService{
 		salesOrderRepo:  salesOrderRepo,
 		invoiceRepo:     invoiceRepo,
+		rmRepo:          rmRepo,
 		eventPublisher:  eventPublisher,
 		inventoryClient: inventoryClient,
 		customerClient:  customerClient,
@@ -141,7 +143,7 @@ func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (
 	}
 	s.eventPublisher.Publish(context.Background(), metadata, event)
 
-	return s.toSalesOrderResponse(salesOrder), nil
+	return s.toSalesOrderResponse(context.Background(), salesOrder), nil
 }
 
 // UpdateSalesOrder updates a sales order (only in draft status)
@@ -229,7 +231,7 @@ func (s *SalesOrderService) UpdateSalesOrder(id uuid.UUID, req *dto.UpdateSalesO
 	}
 	s.eventPublisher.Publish(context.Background(), metadata, event)
 
-	return s.toSalesOrderResponse(salesOrder), nil
+	return s.toSalesOrderResponse(context.Background(), salesOrder), nil
 }
 
 // ConfirmSalesOrder confirms a sales order and generates order number
@@ -298,7 +300,7 @@ func (s *SalesOrderService) ConfirmSalesOrder(id uuid.UUID) (*dto.SalesOrderResp
 	}
 	s.eventPublisher.Publish(context.Background(), metadata, event)
 
-	return s.toSalesOrderResponse(salesOrder), nil
+	return s.toSalesOrderResponse(context.Background(), salesOrder), nil
 }
 
 // CreateInvoiceFromOrder creates an invoice from a confirmed sales order
@@ -461,7 +463,7 @@ func (s *SalesOrderService) MarkAsShipped(id uuid.UUID, req *dto.MarkAsShippedRe
 	}
 	s.eventPublisher.Publish(context.Background(), metadata, event)
 
-	return s.toSalesOrderResponse(salesOrder), nil
+	return s.toSalesOrderResponse(context.Background(), salesOrder), nil
 }
 
 // CancelSalesOrder cancels a sales order
@@ -537,7 +539,7 @@ func (s *SalesOrderService) GetSalesOrder(id uuid.UUID) (*dto.SalesOrderResponse
 	if err != nil {
 		return nil, fmt.Errorf("failed to find sales order: %w", err)
 	}
-	return s.toSalesOrderResponse(salesOrder), nil
+	return s.toSalesOrderResponse(context.Background(), salesOrder), nil
 }
 
 // ListSalesOrders retrieves sales orders with filters
@@ -549,14 +551,14 @@ func (s *SalesOrderService) ListSalesOrders(orgID uuid.UUID, filters *dto.SalesO
 
 	responses := make([]*dto.SalesOrderResponse, len(salesOrders))
 	for i, order := range salesOrders {
-		responses[i] = s.toSalesOrderResponse(order)
+		responses[i] = s.toSalesOrderResponse(context.Background(), order)
 	}
 
 	return responses, total, nil
 }
 
 // toSalesOrderResponse converts domain entity to DTO
-func (s *SalesOrderService) toSalesOrderResponse(salesOrder *domain.SalesOrder) *dto.SalesOrderResponse {
+func (s *SalesOrderService) toSalesOrderResponse(ctx context.Context, salesOrder *domain.SalesOrder) *dto.SalesOrderResponse {
 	items := make([]dto.SalesOrderItemDTO, len(salesOrder.Items))
 	for i, item := range salesOrder.Items {
 		items[i] = dto.SalesOrderItemDTO{
@@ -581,81 +583,67 @@ func (s *SalesOrderService) toSalesOrderResponse(salesOrder *domain.SalesOrder) 
 	var billingStreet, billingCity, billingState, billingCode, billingCountry string
 	var shippingStreet, shippingCity, shippingState, shippingCode, shippingCountry string
 
-	// Type assert to get the concrete repository implementation
-	if repo, ok := s.salesOrderRepo.(interface{ DB() *gorm.DB }); ok {
-		err := repo.DB().
-			Table("customer_rms").
-			Select("display_name, company_name, billing_street, billing_city, billing_state, billing_code, billing_country, shipping_street, shipping_city, shipping_state, shipping_code, shipping_country").
-			Where("id = ?", salesOrder.CustomerID).
-			Row().
-			Scan(&customerName, &companyName, &billingStreet, &billingCity, &billingState, &billingCode, &billingCountry,
-				&shippingStreet, &shippingCity, &shippingState, &shippingCode, &shippingCountry)
-
-		if err != nil || customerName == "" {
-			// Fallback to customerClient if read model fails or provides empty name
-			if s.customerClient != nil {
-				fmt.Printf("[INFO] SalesOrder customer %s missing or invalid in ReadModel, fetching from Customer Service\n", salesOrder.CustomerID)
-				ctx := context.WithValue(context.Background(), "organization_id", salesOrder.OrganizationID)
-				customer, remoteErr := s.customerClient.GetCustomer(ctx, salesOrder.CustomerID)
-				if remoteErr == nil && customer != nil {
-					customerName = customer.DisplayName
-					companyName = customer.CompanyName
-					// Also populate address if they are still empty
-					if billingStreet == "" {
-						billingStreet = customer.BillingStreet
-						billingCity = customer.BillingCity
-						billingState = customer.BillingState
-						billingCode = customer.BillingCode
-						billingCountry = customer.BillingCountry
-					}
-					if shippingStreet == "" {
-						shippingStreet = customer.ShippingStreet
-						shippingCity = customer.ShippingCity
-						shippingState = customer.ShippingState
-						shippingCode = customer.ShippingCode
-						shippingCountry = customer.ShippingCountry
-					}
-				}
-			}
-
-			// If still empty after fallback, use "Unknown Customer"
-			if customerName == "" {
-				customerName = "Unknown Customer"
+	customer, err := s.rmRepo.GetCustomer(ctx, salesOrder.CustomerID)
+	if err != nil || customer == nil || customer.DisplayName == "" {
+		// Fallback to customerClient if read model fails or provides empty name
+		if s.customerClient != nil {
+			fmt.Printf("[INFO] SalesOrder customer %s missing or invalid in ReadModel, fetching from Customer Service\n", salesOrder.CustomerID)
+			remoteCustomer, remoteErr := s.customerClient.GetCustomer(ctx, salesOrder.CustomerID)
+			if remoteErr == nil && remoteCustomer != nil {
+				customerName = remoteCustomer.DisplayName
+				companyName = remoteCustomer.CompanyName
+				billingStreet = remoteCustomer.BillingStreet
+				billingCity = remoteCustomer.BillingCity
+				billingState = remoteCustomer.BillingState
+				billingCode = remoteCustomer.BillingCode
+				billingCountry = remoteCustomer.BillingCountry
+				shippingStreet = remoteCustomer.ShippingStreet
+				shippingCity = remoteCustomer.ShippingCity
+				shippingState = remoteCustomer.ShippingState
+				shippingCode = remoteCustomer.ShippingCode
+				shippingCountry = remoteCustomer.ShippingCountry
 			}
 		}
+
+		// If still empty after fallback, use "Unknown Customer"
+		if customerName == "" {
+			customerName = "Unknown Customer"
+		}
 	} else {
-		customerName = "Unknown Customer"
+		customerName = customer.DisplayName
+		companyName = customer.CompanyName
+		billingStreet = customer.BillingStreet
+		billingCity = customer.BillingCity
+		billingState = customer.BillingState
+		billingCode = customer.BillingCode
+		billingCountry = customer.BillingCountry
+		shippingStreet = customer.ShippingStreet
+		shippingCity = customer.ShippingCity
+		shippingState = customer.ShippingState
+		shippingCode = customer.ShippingCode
+		shippingCountry = customer.ShippingCountry
 	}
 
 	// Fetch contact info if available
 	var contact *dto.ContactResponse
-	if salesOrder.ContactID != nil && s.salesOrderRepo != nil {
-		if repo, ok := s.salesOrderRepo.(interface{ DB() *gorm.DB }); ok {
-			var firstName, lastName, email string
-			err := repo.DB().
-				Table("contact_rms").
-				Select("first_name, last_name, email").
-				Where("id = ?", *salesOrder.ContactID).
-				Row().
-				Scan(&firstName, &lastName, &email)
-			if err == nil && firstName != "" {
+	if salesOrder.ContactID != nil {
+		c, err := s.rmRepo.GetContact(ctx, *salesOrder.ContactID)
+		if err == nil && c != nil && c.FirstName != "" {
+			contact = &dto.ContactResponse{
+				ID:        c.ID,
+				FirstName: c.FirstName,
+				LastName:  c.LastName,
+				Email:     c.Email,
+			}
+		} else if s.customerClient != nil {
+			// Fallback to customerClient
+			remoteContact, remoteErr := s.customerClient.GetContact(ctx, *salesOrder.ContactID)
+			if remoteErr == nil && remoteContact != nil {
 				contact = &dto.ContactResponse{
-					ID:        *salesOrder.ContactID,
-					FirstName: firstName,
-					LastName:  lastName,
-					Email:     email,
-				}
-			} else if s.customerClient != nil {
-				// Fallback to customerClient
-				ctx := context.WithValue(context.Background(), "organization_id", salesOrder.OrganizationID)
-				remoteContact, remoteErr := s.customerClient.GetContact(ctx, *salesOrder.ContactID)
-				if remoteErr == nil && remoteContact != nil {
-					contact = &dto.ContactResponse{
-						ID:        remoteContact.ID,
-						FirstName: remoteContact.FirstName,
-						LastName:  remoteContact.LastName,
-						Email:     remoteContact.Email,
-					}
+					ID:        remoteContact.ID,
+					FirstName: remoteContact.FirstName,
+					LastName:  remoteContact.LastName,
+					Email:     remoteContact.Email,
 				}
 			}
 		}
@@ -676,7 +664,7 @@ func (s *SalesOrderService) toSalesOrderResponse(salesOrder *domain.SalesOrder) 
 		ContactID:      salesOrder.ContactID,
 		OrderNumber:    salesOrder.OrderNumber,
 		Subject:        subject,
-		OrderDate:      salesOrder.OrderDate,
+		OrderDate:      ConvertToOrgTZValue(ctx, salesOrder.OrderDate, salesOrder.OrganizationID, s.rmRepo),
 		Status:         string(salesOrder.Status),
 		SubTotal:       salesOrder.SubTotal,
 		DiscountTotal:  salesOrder.DiscountTotal,
@@ -685,12 +673,12 @@ func (s *SalesOrderService) toSalesOrderResponse(salesOrder *domain.SalesOrder) 
 		TCSAmount:      salesOrder.TCSAmount,
 		TotalAmount:    salesOrder.TotalAmount,
 		InvoiceID:      salesOrder.InvoiceID,
-		ShippedDate:    salesOrder.ShippedDate,
+		ShippedDate:    ConvertToOrgTZ(ctx, salesOrder.ShippedDate, salesOrder.OrganizationID, s.rmRepo),
 		Terms:          salesOrder.Terms,
 		Notes:          salesOrder.Notes,
 		Items:          items,
-		CreatedAt:      salesOrder.CreatedAt,
-		UpdatedAt:      salesOrder.UpdatedAt,
+		CreatedAt:      ConvertToOrgTZValue(ctx, salesOrder.CreatedAt, salesOrder.OrganizationID, s.rmRepo),
+		UpdatedAt:      ConvertToOrgTZValue(ctx, salesOrder.UpdatedAt, salesOrder.OrganizationID, s.rmRepo),
 		Customer: &dto.CustomerResponse{
 			ID:          salesOrder.CustomerID,
 			DisplayName: customerName,
@@ -707,6 +695,5 @@ func (s *SalesOrderService) toSalesOrderResponse(salesOrder *domain.SalesOrder) 
 		ShippingState:   shippingState,
 		ShippingCode:    shippingCode,
 		ShippingCountry: shippingCountry,
-		// Note: TDSPercentage, TCSPercentage, and Adjustment would need to be stored in the sales_orders table if needed
 	}
 }

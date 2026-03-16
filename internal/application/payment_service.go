@@ -18,6 +18,7 @@ type PaymentService struct {
 	paymentRepo    domain.PaymentRepository
 	invoiceRepo    domain.InvoiceRepository
 	salesOrderRepo repositories.SalesOrderRepository
+	rmRepo         domain.ReadModelRepository
 	auditRepo      domain.AuditLogRepository
 	eventPublisher domain.EventPublisher
 }
@@ -27,6 +28,7 @@ func NewPaymentService(
 	paymentRepo domain.PaymentRepository,
 	invoiceRepo domain.InvoiceRepository,
 	salesOrderRepo repositories.SalesOrderRepository,
+	rmRepo domain.ReadModelRepository,
 	auditRepo domain.AuditLogRepository,
 	eventPublisher domain.EventPublisher,
 ) *PaymentService {
@@ -34,6 +36,7 @@ func NewPaymentService(
 		paymentRepo:    paymentRepo,
 		invoiceRepo:    invoiceRepo,
 		salesOrderRepo: salesOrderRepo,
+		rmRepo:         rmRepo,
 		auditRepo:      auditRepo,
 		eventPublisher: eventPublisher,
 	}
@@ -138,7 +141,7 @@ func (s *PaymentService) RecordPayment(ctx context.Context, req dto.RecordPaymen
 		}
 	}
 
-	return s.mapToResponse(payment), nil
+	return s.mapToResponse(ctx, payment), nil
 }
 
 // ListAllPayments returns all payments
@@ -150,7 +153,7 @@ func (s *PaymentService) ListAllPayments(ctx context.Context) ([]*dto.PaymentRes
 
 	responses := make([]*dto.PaymentResponse, len(payments))
 	for i, payment := range payments {
-		responses[i] = s.mapToResponse(&payment)
+		responses[i] = s.mapToResponse(ctx, &payment)
 	}
 
 	return responses, nil
@@ -165,7 +168,7 @@ func (s *PaymentService) ListPaymentsByModule(ctx context.Context, orgID uuid.UU
 
 	responses := make([]*dto.PaymentResponse, len(payments))
 	for i, payment := range payments {
-		responses[i] = s.mapToResponse(&payment)
+		responses[i] = s.mapToResponse(ctx, &payment)
 	}
 
 	return responses, nil
@@ -240,7 +243,7 @@ func (s *PaymentService) ListPaymentsByInvoice(ctx context.Context, invoiceID uu
 
 	responses := make([]dto.PaymentResponse, len(payments))
 	for i, payment := range payments {
-		responses[i] = *s.mapToResponse(&payment)
+		responses[i] = *s.mapToResponse(ctx, &payment)
 	}
 
 	return responses, nil
@@ -256,22 +259,23 @@ func (s *PaymentService) GetPayment(ctx context.Context, paymentID uuid.UUID) (*
 		return nil, fmt.Errorf("payment not found")
 	}
 
-	return s.mapToResponse(payment), nil
+	return s.mapToResponse(ctx, payment), nil
 }
 
 // Helper methods
 
-func (s *PaymentService) mapToResponse(payment *domain.Payment) *dto.PaymentResponse {
+func (s *PaymentService) mapToResponse(ctx context.Context, payment *domain.Payment) *dto.PaymentResponse {
 	return &dto.PaymentResponse{
 		ID:          payment.ID.String(),
 		InvoiceID:   payment.InvoiceID.String(),
 		Amount:      payment.Amount,
 		Method:      string(payment.Method),
 		Reference:   payment.Reference,
-		PaymentDate: payment.PaymentDate,
+		PaymentDate: ConvertToOrgTZValue(ctx, payment.PaymentDate, payment.OrganizationID, s.rmRepo),
 		Status:      string(payment.Status),
 		Notes:       payment.Notes,
-		CreatedAt:   payment.CreatedAt,
+		CreatedAt:   ConvertToOrgTZValue(ctx, payment.CreatedAt, payment.OrganizationID, s.rmRepo),
+		UpdatedAt:   ConvertToOrgTZValue(ctx, payment.UpdatedAt, payment.OrganizationID, s.rmRepo),
 	}
 }
 

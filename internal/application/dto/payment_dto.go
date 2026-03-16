@@ -27,6 +27,7 @@ type PaymentResponse struct {
 	Status      string    `json:"status"`
 	Notes       string    `json:"notes"`
 	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // VoidPaymentRequest represents a request to void a payment

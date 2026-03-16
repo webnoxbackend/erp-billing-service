@@ -98,6 +98,9 @@ type InvoiceResponse struct {
 	ShippingState   string            `json:"shipping_state"`
 	ShippingCode    string            `json:"shipping_code"`
 	ShippingCountry string            `json:"shipping_country"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type CustomerResponse struct {
@@ -132,4 +135,15 @@ type ItemResponse struct {
 type SendInvoiceRequest struct {
 	// Future: EmailRecipients []string `json:"email_recipients"`
 	// Future: SendEmail bool `json:"send_email"`
+}
+
+type InvoiceAuditLogResponse struct {
+	ID          uuid.UUID `json:"id"`
+	InvoiceID   uuid.UUID `json:"invoice_id"`
+	Action      string    `json:"action"`
+	OldStatus   string    `json:"old_status"`
+	NewStatus   string    `json:"new_status"`
+	Notes       string    `json:"notes"`
+	PerformedBy string    `json:"performed_by"`
+	CreatedAt   time.Time `json:"created_at"`
 }
