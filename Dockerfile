@@ -16,9 +16,9 @@ COPY erp-billing-service ./erp-billing-service
 WORKDIR /app/erp-billing-service
 
 # Download dependencies
-ENV GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=https://proxy.golang.org,https://goproxy.io,direct
 ENV GONOSUMDB=*
-RUN go mod download
+RUN for i in 1 2 3; do go mod download && break || (echo "Retry $i..." && sleep 5); done
 
 # Build the application
 RUN CGO_ENABLED=1 GOOS=linux go build -tags dynamic -a -installsuffix cgo -o billing-service ./cmd/api
