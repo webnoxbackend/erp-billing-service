@@ -10,8 +10,8 @@ WORKDIR /app
 COPY efs-shared-events ./efs-shared-events
 COPY efs-shared-kafka ./efs-shared-kafka
 
-# Copy the service code
-COPY erp-billing-service ./erp-billing-service
+# Copy mod files for the specific service
+COPY erp-billing-service/go.mod erp-billing-service/go.sum ./erp-billing-service/
 
 WORKDIR /app/erp-billing-service
 
@@ -19,6 +19,9 @@ WORKDIR /app/erp-billing-service
 ENV GOPROXY=https://proxy.golang.org,direct
 ENV GONOSUMDB=*
 RUN go mod download
+
+# Copy the rest of the source code
+COPY erp-billing-service .
 
 # Build the application
 RUN CGO_ENABLED=1 GOOS=linux go build -tags dynamic -a -installsuffix cgo -o billing-service ./cmd/api
