@@ -16,7 +16,7 @@ COPY erp-billing-service/go.mod erp-billing-service/go.sum ./erp-billing-service
 WORKDIR /app/erp-billing-service
 
 # Download dependencies
-ENV GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=https://goproxy.cn,direct
 ENV GONOSUMDB=*
 RUN go mod download
 
