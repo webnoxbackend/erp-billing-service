@@ -18,7 +18,7 @@ WORKDIR /app/erp-billing-service
 # Download dependencies
 ENV GOPROXY=https://goproxy.cn,https://goproxy.io,direct
 ENV GONOSUMDB=*
-RUN go mod download
+RUN for i in 1 2 3; do go mod download && break || (echo "Retry $i..." && sleep 5); done
 
 # Copy the rest of the source code
 COPY erp-billing-service .
