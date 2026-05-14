@@ -16,7 +16,7 @@ COPY erp-billing-service/go.mod erp-billing-service/go.sum ./erp-billing-service
 WORKDIR /app/erp-billing-service
 
 # Download dependencies
-ENV GOPROXY=https://goproxy.cn,https://goproxy.io,direct
+ENV GOPROXY=https://goproxy.cn,https://goproxy.io,https://proxy.golang.org,direct
 ENV GONOSUMDB=*
 RUN for i in 1 2 3; do go mod download && break || (echo "Retry $i..." && sleep 5); done
 
