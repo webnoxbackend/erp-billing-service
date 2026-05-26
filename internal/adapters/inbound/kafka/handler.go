@@ -339,6 +339,14 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 		custID, _ := uuid.Parse(payload.CustomerID)
 		contID, _ := uuid.Parse(payload.ContactID)
 
+		var serviceCategoryID *uuid.UUID
+		if payload.ServiceCategoryID != "" {
+			parsed, err := uuid.Parse(payload.ServiceCategoryID)
+			if err == nil {
+				serviceCategoryID = &parsed
+			}
+		}
+
 		rm := domain.WorkOrderRM{
 			ID:             id,
 			OrganizationID: orgID,
@@ -347,6 +355,7 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 			BillingStatus:  payload.BillingStatus,
 			CustomerID:     &custID,
 			ContactID:      &contID,
+			ServiceCategoryID: serviceCategoryID,
 			GrandTotal:     payload.GrandTotal,
 			UpdatedAt:      event.Metadata.OccurredAt,
 		}
@@ -425,6 +434,12 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 		}
 		if payload.GrandTotal > 0 {
 			updates["grand_total"] = payload.GrandTotal
+		}
+		if payload.ServiceCategoryID != "" {
+			parsed, err := uuid.Parse(payload.ServiceCategoryID)
+			if err == nil {
+				updates["service_category_id"] = &parsed
+			}
 		}
 		updates["updated_at"] = event.Metadata.OccurredAt
 

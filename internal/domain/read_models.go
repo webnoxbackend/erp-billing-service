@@ -82,6 +82,7 @@ type WorkOrderRM struct {
 	OrganizationID uuid.UUID  `gorm:"type:uuid;index" json:"organization_id"`
 	RequestID      *uuid.UUID `gorm:"type:uuid;index" json:"request_id,omitempty"`
 	EstimateID     *uuid.UUID `gorm:"type:uuid;index" json:"estimate_id,omitempty"`
+	ServiceCategoryID *uuid.UUID `gorm:"type:uuid;index" json:"service_category_id,omitempty"`
 	Summary        string     `json:"summary"`
 	Priority       string     `json:"priority"`
 	Type           string     `json:"type"`
