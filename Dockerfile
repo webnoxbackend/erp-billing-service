@@ -29,7 +29,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build -tags dynamic -a -installsuffix cgo -o bil
 # Runtime stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates libc6-compat librdkafka
+RUN apk --no-cache add ca-certificates libc6-compat librdkafka tzdata
 
 # Create a non-root user
 RUN adduser -D -u 10001 appuser
