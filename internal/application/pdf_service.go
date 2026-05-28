@@ -22,7 +22,12 @@ func NewPDFService(storageBasePath string) *PDFService {
 func (s *PDFService) GenerateInvoicePDF(ctx context.Context, invoice *domain.Invoice, customer *domain.CustomerRM) (string, error) {
 	orgDir := filepath.Join(s.storageBasePath, invoice.OrganizationID.String())
 	if err := os.MkdirAll(orgDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create PDF directory: %w", err)
+		// Log warning and fallback to system temp directory if permission is denied
+		fmt.Printf("[WARNING] Failed to create PDF directory %s: %v. Falling back to temporary directory.\n", orgDir, err)
+		orgDir = filepath.Join(os.TempDir(), "billing-pdfs", invoice.OrganizationID.String())
+		if errFallback := os.MkdirAll(orgDir, 0755); errFallback != nil {
+			return "", fmt.Errorf("failed to create PDF directory (fallback): %w", errFallback)
+		}
 	}
 
 	filename := fmt.Sprintf("%s.pdf", invoice.ID.String())

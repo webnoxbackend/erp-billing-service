@@ -34,6 +34,9 @@ RUN apk --no-cache add ca-certificates libc6-compat librdkafka tzdata
 # Create a non-root user
 RUN adduser -D -u 10001 appuser
 
+# Pre-create default PDF storage directory and grant ownership to appuser
+RUN mkdir -p /var/billing/pdfs && chown -R appuser:appuser /var/billing/pdfs
+
 WORKDIR /home/appuser
 
 # Copy the binary from builder
