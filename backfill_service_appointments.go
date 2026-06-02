@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -128,8 +130,15 @@ func parseUUID(s *string) *uuid.UUID {
 }
 
 func main() {
-	sourceDSN := "postgresql://efswomdbdev:efswomdbdev@123@192.168.0.26:5460/efswomdbdev"
-	targetDSN := "postgresql://efsbillingdevdb:efsbillingdevdb@123@192.168.0.26:5467/efsbillingdevdb"
+	_ = godotenv.Load()
+	sourceDSN := os.Getenv("SOURCE_DATABASE_URL")
+	if sourceDSN == "" {
+		sourceDSN = "postgresql://efswomdbdev:efswomdbdev@123@192.168.0.26:5460/efswomdbdev"
+	}
+	targetDSN := os.Getenv("DATABASE_URL")
+	if targetDSN == "" {
+		targetDSN = "postgresql://efsbillingdevdb:efsbillingdevdb@123@192.168.0.26:5467/efsbillingdevdb"
+	}
 
 	fmt.Println("Connecting to source database (efswomdbdev)...")
 	srcDB, err := gorm.Open(postgres.Open(sourceDSN), &gorm.Config{})

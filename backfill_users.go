@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
+	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -75,8 +77,15 @@ func (TargetUserReadOnly) TableName() string {
 }
 
 func main() {
-	sourceDSN := "postgresql://efsauthdevdb:efsauthdevdb@123@192.168.0.26:5466/efsauthdevdb"
-	targetDSN := "postgresql://efsbillingdevdb:efsbillingdevdb@123@192.168.0.26:5467/efsbillingdevdb"
+	_ = godotenv.Load()
+	sourceDSN := os.Getenv("SOURCE_DATABASE_URL")
+	if sourceDSN == "" {
+		sourceDSN = "postgresql://efsauthdevdb:efsauthdevdb@123@192.168.0.26:5466/efsauthdevdb"
+	}
+	targetDSN := os.Getenv("DATABASE_URL")
+	if targetDSN == "" {
+		targetDSN = "postgresql://efsbillingdevdb:efsbillingdevdb@123@192.168.0.26:5467/efsbillingdevdb"
+	}
 
 	fmt.Println("Connecting to source auth database (efsauthdevdb)...")
 	srcDB, err := gorm.Open(postgres.Open(sourceDSN), &gorm.Config{})

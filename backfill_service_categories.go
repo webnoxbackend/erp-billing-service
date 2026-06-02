@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -52,8 +54,15 @@ func (TargetServiceCategoryReadOnly) TableName() string {
 }
 
 func main() {
-	sourceDSN := "postgresql://efsspdbdev:efsspdbdev@123@192.168.0.26:5458/efsspdbdev"
-	targetDSN := "postgresql://efsbillingdevdb:efsbillingdevdb@123@192.168.0.26:5467/efsbillingdevdb"
+	_ = godotenv.Load()
+	sourceDSN := os.Getenv("SOURCE_DATABASE_URL")
+	if sourceDSN == "" {
+		sourceDSN = "postgresql://efsspdbdev:efsspdbdev@123@192.168.0.26:5458/efsspdbdev"
+	}
+	targetDSN := os.Getenv("DATABASE_URL")
+	if targetDSN == "" {
+		targetDSN = "postgresql://efsbillingdevdb:efsbillingdevdb@123@192.168.0.26:5467/efsbillingdevdb"
+	}
 
 	fmt.Println("Connecting to source database (efsspdbdev)...")
 	srcDB, err := gorm.Open(postgres.Open(sourceDSN), &gorm.Config{})
