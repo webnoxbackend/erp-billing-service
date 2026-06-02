@@ -14,7 +14,10 @@ type CreateInvoiceFromEstimateRequest struct {
 	Subject        string     `json:"subject"`
 	InvoiceDate    time.Time  `json:"invoice_date"`
 	DueDate        time.Time  `json:"due_date"`
-	Currency       string     `json:"currency"`
+	Currency          string     `json:"currency"`
+	ServiceAddressID  *uuid.UUID `json:"service_address_id,omitempty"`
+	BillingAddressID  *uuid.UUID `json:"billing_address_id,omitempty"`
+	ShippingAddressID *uuid.UUID `json:"shipping_address_id,omitempty"`
 	
 	// Totals from estimate
 	SubTotal       float64    `json:"sub_total"`

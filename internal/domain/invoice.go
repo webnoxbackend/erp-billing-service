@@ -47,6 +47,7 @@ type Invoice struct {
 	SourceReferenceID *string      `gorm:"type:varchar(100)" json:"source_reference_id"` // e.g., "WO-12345", "DEAL-789"
 
 	ReferenceNo     string        `gorm:"type:varchar(50)" json:"reference_no"`
+	PaymentTerms    string        `gorm:"type:varchar(50)" json:"payment_terms"`
 	SalesOrder      string        `gorm:"type:varchar(50)" json:"sales_order"`
 	PurchaseOrder   string        `gorm:"type:varchar(50)" json:"purchase_order"`
 	InvoiceDate     time.Time     `json:"invoice_date"`
@@ -70,21 +71,31 @@ type Invoice struct {
 
 	// Sales Order reference - populated when invoice is created from sales order
 	SalesOrderID *uuid.UUID `gorm:"type:uuid;index" json:"sales_order_id"`
+	ServiceCategoryID *uuid.UUID `gorm:"type:uuid;index" json:"service_category_id,omitempty"`
 
 	// TDS/TCS amounts
 	TDSAmount float64 `gorm:"type:decimal(15,2);default:0" json:"tds_amount"`
 	TCSAmount float64 `gorm:"type:decimal(15,2);default:0" json:"tcs_amount"`
 
-	BillingStreet   string        `gorm:"type:varchar(255)" json:"billing_street"`
-	BillingCity     string        `gorm:"type:varchar(100)" json:"billing_city"`
-	BillingState    string        `gorm:"type:varchar(100)" json:"billing_state"`
-	BillingCode     string        `gorm:"type:varchar(20)" json:"billing_code"`
-	BillingCountry  string        `gorm:"type:varchar(100)" json:"billing_country"`
-	ShippingStreet  string        `gorm:"type:varchar(255)" json:"shipping_street"`
-	ShippingCity    string        `gorm:"type:varchar(100)" json:"shipping_city"`
-	ShippingState   string        `gorm:"type:varchar(100)" json:"shipping_state"`
-	ShippingCode    string        `gorm:"type:varchar(20)" json:"shipping_code"`
-	ShippingCountry string        `gorm:"type:varchar(100)" json:"shipping_country"`
+	ServiceAddressID  *uuid.UUID    `gorm:"type:uuid;index" json:"service_address_id,omitempty"`
+	BillingAddressID  *uuid.UUID    `gorm:"type:uuid;index" json:"billing_address_id,omitempty"`
+	ShippingAddressID *uuid.UUID    `gorm:"type:uuid;index" json:"shipping_address_id,omitempty"`
+
+	BillingStreet   string        `gorm:"-" json:"billing_street"`
+	BillingCity     string        `gorm:"-" json:"billing_city"`
+	BillingState    string        `gorm:"-" json:"billing_state"`
+	BillingCode     string        `gorm:"-" json:"billing_code"`
+	BillingCountry  string        `gorm:"-" json:"billing_country"`
+	ShippingStreet  string        `gorm:"-" json:"shipping_street"`
+	ShippingCity    string        `gorm:"-" json:"shipping_city"`
+	ShippingState   string        `gorm:"-" json:"shipping_state"`
+	ShippingCode    string        `gorm:"-" json:"shipping_code"`
+	ShippingCountry string        `gorm:"-" json:"shipping_country"`
+	ServiceStreet   string        `gorm:"-" json:"service_street"`
+	ServiceCity     string        `gorm:"-" json:"service_city"`
+	ServiceState    string        `gorm:"-" json:"service_state"`
+	ServiceCode     string        `gorm:"-" json:"service_code"`
+	ServiceCountry  string        `gorm:"-" json:"service_country"`
 	Items           []InvoiceItem `gorm:"foreignKey:InvoiceID" json:"items"`
 	Payments        []Payment     `gorm:"foreignKey:InvoiceID" json:"payments"`
 	CreatedAt       time.Time     `json:"created_at"`
@@ -169,8 +180,9 @@ type InvoiceItem struct {
 	Quantity    float64   `gorm:"type:decimal(15,2)" json:"quantity"`
 	UnitPrice   float64   `gorm:"type:decimal(15,2)" json:"unit_price"`
 	Discount    float64   `gorm:"type:decimal(15,2)" json:"discount"`
-	Tax         float64   `gorm:"type:decimal(15,2)" json:"tax"`
-	Total       float64   `gorm:"type:decimal(15,2)" json:"total"`
+	Tax         float64    `gorm:"type:decimal(15,2)" json:"tax"`
+	Total       float64    `gorm:"type:decimal(15,2)" json:"total"`
+	ServiceCategoryID *uuid.UUID `gorm:"type:uuid;index" json:"service_category_id,omitempty"`
 
 	// Metadata stores module-specific data without schema changes
 	// Examples:

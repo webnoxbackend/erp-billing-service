@@ -70,7 +70,7 @@ func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (
 				for _, u := range unavailable {
 					errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
 				}
-				return nil, fmt.Errorf(errMsg)
+				return nil, fmt.Errorf("%s", errMsg)
 			}
 		}
 	}
@@ -316,6 +316,26 @@ func (s *SalesOrderService) CreateInvoiceFromOrder(orderID uuid.UUID) (*dto.Invo
 		return nil, fmt.Errorf("cannot create invoice for sales order in %s status or invoice already exists", salesOrder.Status)
 	}
 
+	var billingAddressID, shippingAddressID, serviceAddressID *uuid.UUID
+	var billingStreet, billingCity, billingState, billingCode, billingCountry string
+	var shippingStreet, shippingCity, shippingState, shippingCode, shippingCountry string
+
+	if customer, err := s.rmRepo.GetCustomer(context.Background(), salesOrder.CustomerID); err == nil && customer != nil {
+		billingAddressID = customer.BillingAddressID
+		shippingAddressID = customer.ShippingAddressID
+		serviceAddressID = customer.ServiceAddressID
+		billingStreet = customer.BillingStreet
+		billingCity = customer.BillingCity
+		billingState = customer.BillingState
+		billingCode = customer.BillingCode
+		billingCountry = customer.BillingCountry
+		shippingStreet = customer.ShippingStreet
+		shippingCity = customer.ShippingCity
+		shippingState = customer.ShippingState
+		shippingCode = customer.ShippingCode
+		shippingCountry = customer.ShippingCountry
+	}
+
 	// Create invoice entity
 	invoice := &domain.Invoice{
 		ID:             uuid.New(),
@@ -337,6 +357,19 @@ func (s *SalesOrderService) CreateInvoiceFromOrder(orderID uuid.UUID) (*dto.Invo
 		BalanceAmount:  salesOrder.TotalAmount,
 		Terms:          salesOrder.Terms,
 		Notes:          salesOrder.Notes,
+		BillingAddressID:  billingAddressID,
+		ShippingAddressID: shippingAddressID,
+		ServiceAddressID:  serviceAddressID,
+		BillingStreet:     billingStreet,
+		BillingCity:       billingCity,
+		BillingState:      billingState,
+		BillingCode:       billingCode,
+		BillingCountry:    billingCountry,
+		ShippingStreet:    shippingStreet,
+		ShippingCity:      shippingCity,
+		ShippingState:     shippingState,
+		ShippingCode:      shippingCode,
+		ShippingCountry:   shippingCountry,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 	}

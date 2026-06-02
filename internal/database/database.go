@@ -1,3 +1,4 @@
+
 package database
 
 import (
@@ -91,6 +92,48 @@ func AutoMigrate(db *gorm.DB) error {
 	// Rename organization_read_models if it exists
 	db.Exec("ALTER TABLE IF EXISTS organization_read_models RENAME TO organization_readonly")
 
+	// Drop old customer_rms table to clean up
+	db.Exec("DROP TABLE IF EXISTS customer_rms CASCADE")
+
+	// Drop old item read-model tables to cleanly recreate items_readonly with JSONB fields
+	db.Exec("DROP TABLE IF EXISTS item_rms CASCADE")
+	db.Exec("DROP TABLE IF EXISTS items_rms CASCADE")
+
+	// Drop old work order tables to cleanly recreate work_orders_readonly, etc. with correct fields
+	db.Exec("DROP TABLE IF EXISTS work_order_rms CASCADE")
+	db.Exec("DROP TABLE IF EXISTS work_order_service_line_rms CASCADE")
+	db.Exec("DROP TABLE IF EXISTS work_order_part_line_rms CASCADE")
+
+	// Drop existing users table to cleanly transition to users_readonly
+	db.Exec("DROP TABLE IF EXISTS users CASCADE")
+
+	// Drop extra columns from customers_readonly if they exist
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS phone")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS billing_street")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS billing_city")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS billing_state")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS billing_code")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS billing_country")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS shipping_street")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS shipping_city")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS shipping_state")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS shipping_code")
+	db.Exec("ALTER TABLE IF EXISTS customers_readonly DROP COLUMN IF EXISTS shipping_country")
+
+	// Drop old columns from invoices if they exist
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS billing_street")
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS billing_city")
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS billing_state")
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS billing_code")
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS billing_country")
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS shipping_street")
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS shipping_city")
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS shipping_state")
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS shipping_code")
+	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS shipping_country")
+
+
+
 	// Auto migrate all models
 	err := db.AutoMigrate(
 		&domain.Invoice{},
@@ -108,6 +151,11 @@ func AutoMigrate(db *gorm.DB) error {
 		&domain.SalesReturn{},
 		&domain.SalesReturnItem{},
 		&domain.OrganizationRM{},
+		&domain.AddressReadOnly{},
+		&domain.ServiceCategoryReadOnly{},
+		&domain.ServiceAppointmentRM{},
+		&domain.ServiceAppointmentResourceRM{},
+		&domain.UserReadOnly{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)

@@ -11,16 +11,21 @@ type CreateInvoiceRequest struct {
 	SourceSystem      string  `json:"source_system"`       // FSM, CRM, INVENTORY, MANUAL
 	SourceReferenceID *string `json:"source_reference_id"` // e.g., "WO-12345", "DEAL-789"
 
-	Subject         string              `json:"subject" validate:"required"`
-	CustomerID      uuid.UUID           `json:"customer_id" validate:"required"`
-	ContactID       *uuid.UUID          `json:"contact_id"`
-	OwnerID         *uuid.UUID          `json:"owner_id"`
+	Subject           string              `json:"subject" validate:"required"`
+	CustomerID        uuid.UUID           `json:"customer_id" validate:"required"`
+	ContactID         *uuid.UUID          `json:"contact_id"`
+	OwnerID           *uuid.UUID          `json:"owner_id"`
+	ServiceAddressID  *uuid.UUID          `json:"service_address_id,omitempty"`
+	BillingAddressID  *uuid.UUID          `json:"billing_address_id,omitempty"`
+	ShippingAddressID *uuid.UUID          `json:"shipping_address_id,omitempty"`
 	InvoiceDate     time.Time           `json:"invoice_date"`
 	DueDate         time.Time           `json:"due_date"`
 	ReferenceNo     string              `json:"reference_no"`
+	PaymentTerms    string              `json:"payment_terms"`
 	SalesOrder      string              `json:"sales_order"`
-	SalesOrderID    *uuid.UUID          `json:"sales_order_id"`
-	PurchaseOrder   string              `json:"purchase_order"`
+	SalesOrderID      *uuid.UUID          `json:"sales_order_id"`
+	PurchaseOrder     string              `json:"purchase_order"`
+	ServiceCategoryID *uuid.UUID          `json:"service_category_id,omitempty"`
 	Currency        string              `json:"currency"`
 	Adjustment      float64             `json:"adjustment"`
 	ExciseDuty      float64             `json:"excise_duty"`
@@ -47,8 +52,9 @@ type CreateInvoiceItem struct {
 	Description string    `json:"description"`
 	Quantity    float64   `json:"quantity" validate:"required,gt=0"`
 	UnitPrice   float64   `json:"unit_price" validate:"required,gte=0"`
-	Discount    float64   `json:"discount"`
-	Tax         float64   `json:"tax"`
+	Discount    float64    `json:"discount"`
+	Tax         float64    `json:"tax"`
+	ServiceCategoryID *uuid.UUID `json:"service_category_id,omitempty"`
 	// Module-specific metadata (FSM: technician_id, CRM: deal_id, etc.)
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -74,10 +80,16 @@ type InvoiceResponse struct {
 	SalesCommission float64    `json:"sales_commission"`
 	SalesOrder      string     `json:"sales_order"`
 	PurchaseOrder   string     `json:"purchase_order"`
+	PaymentTerms    string     `json:"payment_terms"`
+	Currency        string     `json:"currency"`
+	ServiceCategoryID *uuid.UUID `json:"service_category_id,omitempty"`
 	OwnerID         *uuid.UUID `json:"owner_id"`
-	CustomerID      uuid.UUID  `json:"customer_id"`
-	ContactID       *uuid.UUID `json:"contact_id"`
-	InvoiceDate     time.Time  `json:"invoice_date"`
+	CustomerID         uuid.UUID  `json:"customer_id"`
+	ContactID          *uuid.UUID `json:"contact_id"`
+	ServiceAddressID   *uuid.UUID `json:"service_address_id,omitempty"`
+	BillingAddressID   *uuid.UUID `json:"billing_address_id,omitempty"`
+	ShippingAddressID  *uuid.UUID `json:"shipping_address_id,omitempty"`
+	InvoiceDate       time.Time  `json:"invoice_date"`
 	DueDate         time.Time  `json:"due_date"`
 
 	// PDF path - populated when invoice is sent
@@ -124,8 +136,9 @@ type ItemResponse struct {
 	Quantity    float64   `json:"quantity"`
 	UnitPrice   float64   `json:"unit_price"`
 	Discount    float64   `json:"discount"`
-	Tax         float64   `json:"tax"`
-	Total       float64   `json:"total"`
+	Tax         float64    `json:"tax"`
+	Total       float64    `json:"total"`
+	ServiceCategoryID *uuid.UUID `json:"service_category_id,omitempty"`
 	// Module-specific metadata returned as-is
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }

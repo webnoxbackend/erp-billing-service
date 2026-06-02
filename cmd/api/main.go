@@ -96,9 +96,12 @@ func main() {
 		"inventory.parts",
 		"billing.invoices",
 		"items.items", // Subscribe to item events from service and parts service
+		"items.service_categories", // Subscribe to service categories events
 		"org.organizations",
 		"workorder.workorders",
 		"workorder.estimates",
+		"workorder.appointments",
+		"auth.users",
 	}
 	consumerGroup, err := shared_kafka.NewConsumerGroup(kafkaCfg, "billing-service-group", topics, eventHandler, nil)
 	if err != nil {

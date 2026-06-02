@@ -33,6 +33,7 @@ func (r *InvoiceRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.
 	if err != nil {
 		return nil, err
 	}
+	r.populateInvoiceAddressFields(ctx, &invoice)
 	return &invoice, nil
 }
 
@@ -44,6 +45,9 @@ func (r *InvoiceRepository) List(ctx context.Context, filter map[string]interfac
 		Where(filter).
 		Order("created_at desc").
 		Find(&invoices).Error
+	if err == nil {
+		r.populateInvoicesAddressFields(ctx, invoices)
+	}
 	return invoices, err
 }
 
@@ -55,7 +59,142 @@ func (r *InvoiceRepository) ListByModule(ctx context.Context, orgID uuid.UUID, s
 		Where("organization_id = ? AND source_system = ?", orgID, sourceSystem).
 		Order("created_at desc").
 		Find(&invoices).Error
+	if err == nil {
+		r.populateInvoicesAddressFields(ctx, invoices)
+	}
 	return invoices, err
+}
+
+func (r *InvoiceRepository) populateInvoiceAddressFields(ctx context.Context, invoice *domain.Invoice) {
+	if invoice == nil {
+		return
+	}
+	if invoice.BillingAddressID != nil {
+		var addr domain.AddressReadOnly
+		if err := r.db.WithContext(ctx).First(&addr, "id = ?", *invoice.BillingAddressID).Error; err == nil {
+			invoice.BillingStreet = addr.Street1
+			if addr.Street2 != "" {
+				invoice.BillingStreet = addr.Street1 + ", " + addr.Street2
+			}
+			invoice.BillingCity = addr.City
+			invoice.BillingState = addr.State
+			invoice.BillingCode = addr.PostalCode
+			invoice.BillingCountry = addr.Country
+		}
+	}
+	if invoice.ShippingAddressID != nil {
+		var addr domain.AddressReadOnly
+		if err := r.db.WithContext(ctx).First(&addr, "id = ?", *invoice.ShippingAddressID).Error; err == nil {
+			invoice.ShippingStreet = addr.Street1
+			if addr.Street2 != "" {
+				invoice.ShippingStreet = addr.Street1 + ", " + addr.Street2
+			}
+			invoice.ShippingCity = addr.City
+			invoice.ShippingState = addr.State
+			invoice.ShippingCode = addr.PostalCode
+			invoice.ShippingCountry = addr.Country
+		}
+	}
+	if invoice.ServiceAddressID != nil {
+		var addr domain.AddressReadOnly
+		if err := r.db.WithContext(ctx).First(&addr, "id = ?", *invoice.ServiceAddressID).Error; err == nil {
+			invoice.ServiceStreet = addr.Street1
+			if addr.Street2 != "" {
+				invoice.ServiceStreet = addr.Street1 + ", " + addr.Street2
+			}
+			invoice.ServiceCity = addr.City
+			invoice.ServiceState = addr.State
+			invoice.ServiceCode = addr.PostalCode
+			invoice.ServiceCountry = addr.Country
+		}
+	}
+}
+
+func (r *InvoiceRepository) populateInvoicesAddressFields(ctx context.Context, invoices []domain.Invoice) {
+	if len(invoices) == 0 {
+		return
+	}
+	
+	// Collect all unique address IDs
+	addressIDs := make([]uuid.UUID, 0)
+	addressIDMap := make(map[uuid.UUID]bool)
+	for _, inv := range invoices {
+		if inv.BillingAddressID != nil {
+			if !addressIDMap[*inv.BillingAddressID] {
+				addressIDMap[*inv.BillingAddressID] = true
+				addressIDs = append(addressIDs, *inv.BillingAddressID)
+			}
+		}
+		if inv.ShippingAddressID != nil {
+			if !addressIDMap[*inv.ShippingAddressID] {
+				addressIDMap[*inv.ShippingAddressID] = true
+				addressIDs = append(addressIDs, *inv.ShippingAddressID)
+			}
+		}
+		if inv.ServiceAddressID != nil {
+			if !addressIDMap[*inv.ServiceAddressID] {
+				addressIDMap[*inv.ServiceAddressID] = true
+				addressIDs = append(addressIDs, *inv.ServiceAddressID)
+			}
+		}
+	}
+	
+	if len(addressIDs) == 0 {
+		return
+	}
+	
+	// Fetch all addresses in one query
+	var addresses []domain.AddressReadOnly
+	if err := r.db.WithContext(ctx).Where("id IN ?", addressIDs).Find(&addresses).Error; err != nil {
+		return
+	}
+	
+	// Map address ID to address struct
+	addrMap := make(map[uuid.UUID]domain.AddressReadOnly)
+	for _, addr := range addresses {
+		addrMap[addr.ID] = addr
+	}
+	
+	// Populate invoice fields
+	for i := range invoices {
+		inv := &invoices[i]
+		if inv.BillingAddressID != nil {
+			if addr, ok := addrMap[*inv.BillingAddressID]; ok {
+				inv.BillingStreet = addr.Street1
+				if addr.Street2 != "" {
+					inv.BillingStreet = addr.Street1 + ", " + addr.Street2
+				}
+				inv.BillingCity = addr.City
+				inv.BillingState = addr.State
+				inv.BillingCode = addr.PostalCode
+				inv.BillingCountry = addr.Country
+			}
+		}
+		if inv.ShippingAddressID != nil {
+			if addr, ok := addrMap[*inv.ShippingAddressID]; ok {
+				inv.ShippingStreet = addr.Street1
+				if addr.Street2 != "" {
+					inv.ShippingStreet = addr.Street1 + ", " + addr.Street2
+				}
+				inv.ShippingCity = addr.City
+				inv.ShippingState = addr.State
+				inv.ShippingCode = addr.PostalCode
+				inv.ShippingCountry = addr.Country
+			}
+		}
+		if inv.ServiceAddressID != nil {
+			if addr, ok := addrMap[*inv.ServiceAddressID]; ok {
+				inv.ServiceStreet = addr.Street1
+				if addr.Street2 != "" {
+					inv.ServiceStreet = addr.Street1 + ", " + addr.Street2
+				}
+				inv.ServiceCity = addr.City
+				inv.ServiceState = addr.State
+				inv.ServiceCode = addr.PostalCode
+				inv.ServiceCountry = addr.Country
+			}
+		}
+	}
 }
 
 func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID) error {

@@ -53,8 +53,16 @@ func (h *EventHandler) Handle(ctx context.Context, data []byte) error {
 			return h.handleWorkOrderEvent(tx, baseEvent)
 		case shared_events.AggregateOrganization:
 			return h.handleOrganizationEvent(tx, baseEvent)
+		case shared_events.AggregateAddress:
+			return h.handleAddressEvent(tx, baseEvent)
+		case shared_events.AggregateServiceCategory:
+			return h.handleServiceCategoryEvent(tx, baseEvent)
 		case "invoice":
 			return h.handleInvoiceEvent(tx, baseEvent)
+		case shared_events.AggregateAppointment:
+			return h.handleAppointmentEvent(tx, baseEvent)
+		case shared_events.AggregateUser:
+			return h.handleUserEvent(tx, baseEvent)
 		default:
 			log.Printf("Ignoring unrelated aggregate type: %s", baseEvent.Metadata.AggregateType)
 			return nil
@@ -85,19 +93,76 @@ func (h *EventHandler) handleCustomerEvent(tx *gorm.DB, event *shared_events.Bas
 			displayName = "Unknown Customer"
 		}
 
+		var externalKey *string
+		if payload.ExternalKey != "" {
+			externalKey = &payload.ExternalKey
+		}
+
+		var serviceAddressID, billingAddressID, shippingAddressID, parentAccountID *uuid.UUID
+		if payload.ServiceAddressID != "" {
+			if parsed, err := uuid.Parse(payload.ServiceAddressID); err == nil {
+				serviceAddressID = &parsed
+			}
+		}
+		if payload.BillingAddressID != "" {
+			if parsed, err := uuid.Parse(payload.BillingAddressID); err == nil {
+				billingAddressID = &parsed
+			}
+		}
+		if payload.ShippingAddressID != "" {
+			if parsed, err := uuid.Parse(payload.ShippingAddressID); err == nil {
+				shippingAddressID = &parsed
+			}
+		}
+		if payload.ParentAccountID != "" {
+			if parsed, err := uuid.Parse(payload.ParentAccountID); err == nil {
+				parentAccountID = &parsed
+			}
+		}
+
 		rm := domain.CustomerRM{
-			ID:             customerID,
-			OrganizationID: orgID,
-			DisplayName:    displayName,
-			CompanyName:    payload.CompanyName,
-			Email:          payload.Email,
-			Phone:          payload.Phone,
-			BillingStreet:  payload.Street1,
-			BillingCity:    payload.City,
-			BillingState:   payload.State,
-			BillingCode:    payload.ZipCode,
-			BillingCountry: payload.Country,
-			UpdatedAt:      event.Metadata.OccurredAt,
+			ID:                customerID,
+			OrganizationID:    orgID,
+			ExternalKey:       externalKey,
+			CustomerType:      payload.CustomerType,
+			DisplayName:       displayName,
+			CompanyName:       payload.CompanyName,
+			FirstName:         payload.FirstName,
+			LastName:          payload.LastName,
+			Salutation:        payload.Salutation,
+			Email:             payload.Email,
+			PhoneWork:         payload.PhoneWork,
+			PhoneMobile:       payload.PhoneMobile,
+			WebsiteURL:        payload.WebsiteURL,
+			TaxNumber:         payload.TaxNumber,
+			CurrencyCode:      payload.CurrencyCode,
+			PaymentTerms:      payload.PaymentTerms,
+			IsTaxable:         payload.IsTaxable,
+			Industry:          payload.Industry,
+			Rating:            payload.Rating,
+			Ownership:         payload.Ownership,
+			AnnualRevenue:     payload.AnnualRevenue,
+			PortalEnabled:     payload.PortalEnabled,
+			Status:            payload.Status,
+			SourceSystem:      payload.SourceSystem,
+			SourceID:          payload.SourceID,
+			ServiceAddressID:  serviceAddressID,
+			BillingAddressID:  billingAddressID,
+			ShippingAddressID: shippingAddressID,
+			AccountOwner:      payload.AccountOwner,
+			AccountSite:       payload.AccountSite,
+			ParentAccountID:   parentAccountID,
+			CustomerLanguage:  payload.CustomerLanguage,
+			CreatedAt:         event.Metadata.OccurredAt,
+			UpdatedAt:         event.Metadata.OccurredAt,
+
+			// Ignored DB fields filled for compatibility
+			Phone:            payload.Phone,
+			BillingStreet:    payload.Street1,
+			BillingCity:      payload.City,
+			BillingState:     payload.State,
+			BillingCode:      payload.ZipCode,
+			BillingCountry:   payload.Country,
 		}
 
 		return tx.Clauses(clause.OnConflict{
@@ -124,18 +189,118 @@ func (h *EventHandler) handleCustomerEvent(tx *gorm.DB, event *shared_events.Bas
 			return false
 		}
 
-		// Update fields if they are present in UpdatedFields or non-empty (as fallback)
+		if payload.ExternalKey != "" || isUpdated("external_key") {
+			if payload.ExternalKey == "" {
+				updates["external_key"] = nil
+			} else {
+				updates["external_key"] = &payload.ExternalKey
+			}
+		}
+		if payload.CustomerType != "" || isUpdated("customer_type") {
+			updates["customer_type"] = payload.CustomerType
+		}
 		if payload.CompanyName != "" || isUpdated("company_name") {
 			updates["company_name"] = payload.CompanyName
+		}
+		if payload.FirstName != "" || isUpdated("first_name") {
+			updates["first_name"] = payload.FirstName
+		}
+		if payload.LastName != "" || isUpdated("last_name") {
+			updates["last_name"] = payload.LastName
+		}
+		if payload.Salutation != "" || isUpdated("salutation") {
+			updates["salutation"] = payload.Salutation
 		}
 		if payload.Email != "" || isUpdated("email") {
 			updates["email"] = payload.Email
 		}
+		if payload.PhoneWork != "" || isUpdated("phone_work") {
+			updates["phone_work"] = payload.PhoneWork
+		}
+		if payload.PhoneMobile != "" || isUpdated("phone_mobile") {
+			updates["phone_mobile"] = payload.PhoneMobile
+		}
+		if payload.WebsiteURL != "" || isUpdated("website_url") {
+			updates["website_url"] = payload.WebsiteURL
+		}
+		if payload.TaxNumber != "" || isUpdated("tax_number") {
+			updates["tax_number"] = payload.TaxNumber
+		}
+		if payload.CurrencyCode != "" || isUpdated("currency_code") {
+			updates["currency_code"] = payload.CurrencyCode
+		}
+		if payload.PaymentTerms != "" || isUpdated("payment_terms") {
+			updates["payment_terms"] = payload.PaymentTerms
+		}
+		if payload.IsTaxable != nil || isUpdated("is_taxable") {
+			updates["is_taxable"] = payload.IsTaxable
+		}
+		if payload.Industry != "" || isUpdated("industry") {
+			updates["industry"] = payload.Industry
+		}
+		if payload.Rating != "" || isUpdated("rating") {
+			updates["rating"] = payload.Rating
+		}
+		if payload.Ownership != "" || isUpdated("ownership") {
+			updates["ownership"] = payload.Ownership
+		}
+		if payload.AnnualRevenue != nil || isUpdated("annual_revenue") {
+			updates["annual_revenue"] = payload.AnnualRevenue
+		}
+		if payload.PortalEnabled != nil || isUpdated("portal_enabled") {
+			updates["portal_enabled"] = payload.PortalEnabled
+		}
+		if payload.Status != "" || isUpdated("status") {
+			updates["status"] = payload.Status
+		}
+		if payload.SourceSystem != "" || isUpdated("source_system") {
+			updates["source_system"] = payload.SourceSystem
+		}
+		if payload.SourceID != "" || isUpdated("source_id") {
+			updates["source_id"] = payload.SourceID
+		}
+		if payload.ServiceAddressID != "" || isUpdated("service_address_id") {
+			if payload.ServiceAddressID == "" {
+				updates["service_address_id"] = nil
+			} else if parsed, err := uuid.Parse(payload.ServiceAddressID); err == nil {
+				updates["service_address_id"] = &parsed
+			}
+		}
+		if payload.BillingAddressID != "" || isUpdated("billing_address_id") {
+			if payload.BillingAddressID == "" {
+				updates["billing_address_id"] = nil
+			} else if parsed, err := uuid.Parse(payload.BillingAddressID); err == nil {
+				updates["billing_address_id"] = &parsed
+			}
+		}
+		if payload.ShippingAddressID != "" || isUpdated("shipping_address_id") {
+			if payload.ShippingAddressID == "" {
+				updates["shipping_address_id"] = nil
+			} else if parsed, err := uuid.Parse(payload.ShippingAddressID); err == nil {
+				updates["shipping_address_id"] = &parsed
+			}
+		}
+		if payload.AccountOwner != "" || isUpdated("account_owner") {
+			updates["account_owner"] = payload.AccountOwner
+		}
+		if payload.AccountSite != "" || isUpdated("account_site") {
+			updates["account_site"] = payload.AccountSite
+		}
+		if payload.ParentAccountID != "" || isUpdated("parent_account_id") {
+			if payload.ParentAccountID == "" {
+				updates["parent_account_id"] = nil
+			} else if parsed, err := uuid.Parse(payload.ParentAccountID); err == nil {
+				updates["parent_account_id"] = &parsed
+			}
+		}
+		if payload.CustomerLanguage != "" || isUpdated("customer_language") {
+			updates["customer_language"] = payload.CustomerLanguage
+		}
+
+		// Also update the compatibility flat fields in updates
 		if payload.Phone != "" || isUpdated("phone") {
 			updates["phone"] = payload.Phone
 		}
-
-		// Address fields
 		if payload.Street1 != "" || isUpdated("street1") {
 			updates["billing_street"] = payload.Street1
 		}
@@ -159,33 +324,33 @@ func (h *EventHandler) handleCustomerEvent(tx *gorm.DB, event *shared_events.Bas
 			var lastName = payload.LastName
 
 			if firstName != "" || lastName != "" {
-				// If we have at least one name part in the payload
 				if firstName != "" && lastName != "" {
 					updates["display_name"] = strings.TrimSpace(fmt.Sprintf("%s %s", firstName, lastName))
 				} else {
-					// We have only one part. We need to fetch current values to be safe.
 					var current domain.CustomerRM
 					if err := tx.First(&current, "id = ?", customerID).Error; err == nil {
-						// This is still a bit simplified but better than nothing
 						if firstName == "" {
 							updates["display_name"] = strings.TrimSpace(fmt.Sprintf("%s %s", current.DisplayName, lastName))
 						} else {
 							updates["display_name"] = strings.TrimSpace(fmt.Sprintf("%s %s", firstName, current.DisplayName))
 						}
-						// Note: The above is still brittle because we don't know if current.DisplayName
-						// is already a combination or just a company name.
-						// But with the new DisplayName field, this fallback will be used less often.
 					}
 				}
-			} else if payload.CompanyName != "" || isUpdated("company_name") {
-				// If only company name is updated, we might want to update display name if it was company name before.
-				// For now, let's just trust the explicit DisplayName update.
 			}
 		}
 
 		updates["updated_at"] = event.Metadata.OccurredAt
 
 		return tx.Model(&domain.CustomerRM{}).Where("id = ?", customerID).Updates(updates).Error
+
+	case shared_events.CustomerDeleted:
+		var payload shared_events.CustomerDeletedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		customerID, _ := uuid.Parse(payload.CustomerID)
+		return tx.Where("id = ?", customerID).Delete(&domain.CustomerRM{}).Error
 
 	default:
 		return nil
@@ -284,15 +449,24 @@ func (h *EventHandler) handleServiceEvent(tx *gorm.DB, event *shared_events.Base
 	serviceID, _ := uuid.Parse(payload.ServiceID)
 	orgID, _ := uuid.Parse(payload.OrganizationID)
 
+	salesInfo := domain.JSONB{
+		"selling_price": payload.BasePrice,
+		"selling_currency": "INR",
+		"sellable": true,
+		"taxable": false,
+		"discount_allowed": false,
+	}
+
 	rm := domain.ItemRM{
 		ID:             serviceID,
 		OrganizationID: orgID,
 		Name:           payload.Name,
 		Description:    payload.Description,
-		ItemType:       "service",
+		Type:           "service",
 		Status:         payload.Status,
-		SellingPrice:   payload.BasePrice,
+		SalesInfo:      salesInfo,
 		UpdatedAt:      event.Metadata.OccurredAt,
+		CreatedAt:      event.Metadata.OccurredAt,
 	}
 
 	return tx.Clauses(clause.OnConflict{
@@ -309,16 +483,25 @@ func (h *EventHandler) handlePartEvent(tx *gorm.DB, event *shared_events.BaseEve
 	partID, _ := uuid.Parse(payload.PartID)
 	orgID, _ := uuid.Parse(payload.OrganizationID)
 
+	salesInfo := domain.JSONB{
+		"selling_price": payload.UnitPrice,
+		"selling_currency": "INR",
+		"sellable": true,
+		"taxable": false,
+		"discount_allowed": false,
+	}
+
 	rm := domain.ItemRM{
 		ID:             partID,
 		OrganizationID: orgID,
 		SKU:            payload.PartNumber,
 		Name:           payload.Name,
 		Description:    payload.Description,
-		ItemType:       "part",
+		Type:           "goods",
 		Status:         payload.Status,
-		SellingPrice:   payload.UnitPrice,
+		SalesInfo:      salesInfo,
 		UpdatedAt:      event.Metadata.OccurredAt,
+		CreatedAt:      event.Metadata.OccurredAt,
 	}
 
 	return tx.Clauses(clause.OnConflict{
@@ -336,8 +519,50 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 
 		id, _ := uuid.Parse(payload.WorkOrderID)
 		orgID, _ := uuid.Parse(payload.OrganizationID)
-		custID, _ := uuid.Parse(payload.CustomerID)
-		contID, _ := uuid.Parse(payload.ContactID)
+
+		var requestID, estimateID, assetID, requiredSkillID, serviceAddressID, billingAddressID *uuid.UUID
+		if payload.RequestID != "" {
+			if parsed, err := uuid.Parse(payload.RequestID); err == nil {
+				requestID = &parsed
+			}
+		}
+		if payload.EstimateID != "" {
+			if parsed, err := uuid.Parse(payload.EstimateID); err == nil {
+				estimateID = &parsed
+			}
+		}
+		if payload.AssetID != "" {
+			if parsed, err := uuid.Parse(payload.AssetID); err == nil {
+				assetID = &parsed
+			}
+		}
+		if payload.RequiredSkillID != "" {
+			if parsed, err := uuid.Parse(payload.RequiredSkillID); err == nil {
+				requiredSkillID = &parsed
+			}
+		}
+		if payload.ServiceAddressID != "" {
+			if parsed, err := uuid.Parse(payload.ServiceAddressID); err == nil {
+				serviceAddressID = &parsed
+			}
+		}
+		if payload.BillingAddressID != "" {
+			if parsed, err := uuid.Parse(payload.BillingAddressID); err == nil {
+				billingAddressID = &parsed
+			}
+		}
+
+		var custID, contID *uuid.UUID
+		if payload.CustomerID != "" {
+			if parsed, err := uuid.Parse(payload.CustomerID); err == nil {
+				custID = &parsed
+			}
+		}
+		if payload.ContactID != "" {
+			if parsed, err := uuid.Parse(payload.ContactID); err == nil {
+				contID = &parsed
+			}
+		}
 
 		var serviceCategoryID *uuid.UUID
 		if payload.ServiceCategoryID != "" {
@@ -348,16 +573,34 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 		}
 
 		rm := domain.WorkOrderRM{
-			ID:             id,
-			OrganizationID: orgID,
-			Summary:        payload.Summary,
-			Status:         payload.Status,
-			BillingStatus:  payload.BillingStatus,
-			CustomerID:     &custID,
-			ContactID:      &contID,
+			ID:                id,
+			OrganizationID:    orgID,
+			RequestID:         requestID,
+			EstimateID:        estimateID,
 			ServiceCategoryID: serviceCategoryID,
-			GrandTotal:     payload.GrandTotal,
-			UpdatedAt:      event.Metadata.OccurredAt,
+			Summary:           payload.Summary,
+			Priority:          payload.Priority,
+			Type:              payload.Type,
+			DueDate:           payload.DueDate,
+			Status:            payload.Status,
+			BillingStatus:     payload.BillingStatus,
+			AssetID:           assetID,
+			RequiredSkillID:   requiredSkillID,
+			CustomerID:        custID,
+			ContactID:         contID,
+			ServiceAddressID:  serviceAddressID,
+			BillingAddressID:  billingAddressID,
+			PreferredDate1:    payload.PreferredDate1,
+			PreferredDate2:    payload.PreferredDate2,
+			PreferredTime:     payload.PreferredTime,
+			PreferenceNote:    payload.PreferenceNote,
+			SubTotal:          payload.SubTotal,
+			Discount:          payload.Discount,
+			Adjustment:        payload.Adjustment,
+			GrandTotal:        payload.GrandTotal,
+			CreatedAt:         event.Metadata.OccurredAt,
+			UpdatedAt:         event.Metadata.OccurredAt,
+			SyncedAt:          event.Metadata.OccurredAt,
 		}
 
 		if err := tx.Clauses(clause.OnConflict{
@@ -383,6 +626,9 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 				Unit:        line.Unit,
 				ListPrice:   line.ListPrice,
 				LineAmount:  line.LineAmount,
+				CreatedAt:   event.Metadata.OccurredAt,
+				UpdatedAt:   event.Metadata.OccurredAt,
+				SyncedAt:    event.Metadata.OccurredAt,
 			}
 			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&sl).Error; err != nil {
 				return err
@@ -406,6 +652,9 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 				Unit:        line.Unit,
 				ListPrice:   line.ListPrice,
 				LineAmount:  line.LineAmount,
+				CreatedAt:   event.Metadata.OccurredAt,
+				UpdatedAt:   event.Metadata.OccurredAt,
+				SyncedAt:    event.Metadata.OccurredAt,
 			}
 			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&pl).Error; err != nil {
 				return err
@@ -426,11 +675,71 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 		if payload.Summary != "" {
 			updates["summary"] = payload.Summary
 		}
+		if payload.Priority != "" {
+			updates["priority"] = payload.Priority
+		}
+		if payload.Type != "" {
+			updates["type"] = payload.Type
+		}
+		if payload.DueDate != nil {
+			updates["due_date"] = payload.DueDate
+		}
 		if payload.Status != "" {
 			updates["status"] = payload.Status
 		}
 		if payload.BillingStatus != "" {
 			updates["billing_status"] = payload.BillingStatus
+		}
+		if payload.AssetID != "" {
+			if parsed, err := uuid.Parse(payload.AssetID); err == nil {
+				updates["asset_id"] = &parsed
+			}
+		}
+		if payload.RequiredSkillID != "" {
+			if parsed, err := uuid.Parse(payload.RequiredSkillID); err == nil {
+				updates["required_skill_id"] = &parsed
+			}
+		}
+		if payload.CustomerID != "" {
+			if parsed, err := uuid.Parse(payload.CustomerID); err == nil {
+				updates["customer_id"] = &parsed
+			}
+		}
+		if payload.ContactID != "" {
+			if parsed, err := uuid.Parse(payload.ContactID); err == nil {
+				updates["contact_id"] = &parsed
+			}
+		}
+		if payload.ServiceAddressID != "" {
+			if parsed, err := uuid.Parse(payload.ServiceAddressID); err == nil {
+				updates["service_address_id"] = &parsed
+			}
+		}
+		if payload.BillingAddressID != "" {
+			if parsed, err := uuid.Parse(payload.BillingAddressID); err == nil {
+				updates["billing_address_id"] = &parsed
+			}
+		}
+		if payload.PreferredDate1 != nil {
+			updates["preferred_date1"] = payload.PreferredDate1
+		}
+		if payload.PreferredDate2 != nil {
+			updates["preferred_date2"] = payload.PreferredDate2
+		}
+		if payload.PreferredTime != "" {
+			updates["preferred_time"] = payload.PreferredTime
+		}
+		if payload.PreferenceNote != "" {
+			updates["preference_note"] = payload.PreferenceNote
+		}
+		if payload.SubTotal > 0 {
+			updates["sub_total"] = payload.SubTotal
+		}
+		if payload.Discount > 0 {
+			updates["discount"] = payload.Discount
+		}
+		if payload.Adjustment > 0 {
+			updates["adjustment"] = payload.Adjustment
 		}
 		if payload.GrandTotal > 0 {
 			updates["grand_total"] = payload.GrandTotal
@@ -442,6 +751,7 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 			}
 		}
 		updates["updated_at"] = event.Metadata.OccurredAt
+		updates["synced_at"] = event.Metadata.OccurredAt
 
 		if err := tx.Model(&domain.WorkOrderRM{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return err
@@ -468,6 +778,9 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 					Unit:        line.Unit,
 					ListPrice:   line.ListPrice,
 					LineAmount:  line.LineAmount,
+					CreatedAt:   event.Metadata.OccurredAt,
+					UpdatedAt:   event.Metadata.OccurredAt,
+					SyncedAt:    event.Metadata.OccurredAt,
 				}
 				if err := tx.Create(&sl).Error; err != nil {
 					return err
@@ -495,6 +808,9 @@ func (h *EventHandler) handleWorkOrderEvent(tx *gorm.DB, event *shared_events.Ba
 					Unit:        line.Unit,
 					ListPrice:   line.ListPrice,
 					LineAmount:  line.LineAmount,
+					CreatedAt:   event.Metadata.OccurredAt,
+					UpdatedAt:   event.Metadata.OccurredAt,
+					SyncedAt:    event.Metadata.OccurredAt,
 				}
 				if err := tx.Create(&pl).Error; err != nil {
 					return err
@@ -528,108 +844,47 @@ func (h *EventHandler) handleItemEvent(tx *gorm.DB, event *shared_events.BaseEve
 		itemID, _ := uuid.Parse(payload.ItemID)
 		orgID, _ := uuid.Parse(payload.OrganizationID)
 
-		// Determine item type
-		itemType := "part"
-		if payload.Type == "service" {
-			itemType = "service"
-		} else if payload.Type == "goods" {
-			itemType = "goods"
+		var brandID, categoryID, createdBy *string
+		if payload.BrandID != nil && *payload.BrandID != "" {
+			brandID = payload.BrandID
 		}
-
-		// Extract pricing information
-		var sellingPrice, costPrice float64
-		var currency, unit string
-		var taxable bool
-		var taxRate float64
-
-		if payload.SalesInfo != nil {
-			if v, ok := payload.SalesInfo["selling_price"].(float64); ok {
-				sellingPrice = v
-			}
-			if v, ok := payload.SalesInfo["rate"].(float64); ok && sellingPrice == 0 {
-				sellingPrice = v
-			}
-			if v, ok := payload.SalesInfo["selling_currency"].(string); ok {
-				currency = v
-			}
-			if v, ok := payload.SalesInfo["taxable"].(bool); ok {
-				taxable = v
-			}
-			if v, ok := payload.SalesInfo["tax_rate"].(float64); ok {
-				taxRate = v
-			}
+		if payload.CategoryID != "" {
+			categoryID = &payload.CategoryID
 		}
-
-		if payload.PurchaseInfo != nil {
-			if v, ok := payload.PurchaseInfo["cost_price"].(float64); ok {
-				costPrice = v
-			}
-			if currency == "" {
-				if v, ok := payload.PurchaseInfo["cost_currency"].(string); ok {
-					currency = v
-				}
-			}
-		}
-
-		// Extract inventory information
-		var qtyOnHand, qtyAvailable, qtyReserved, qtyDamaged float64
-		var reorderLevel, reorderQty float64
-		var trackInventory bool
-
-		if payload.InventoryInfo != nil {
-			if v, ok := payload.InventoryInfo["quantity_on_hand"].(float64); ok {
-				qtyOnHand = v
-			}
-			if v, ok := payload.InventoryInfo["quantity_available"].(float64); ok {
-				qtyAvailable = v
-			}
-			if v, ok := payload.InventoryInfo["quantity_reserved"].(float64); ok {
-				qtyReserved = v
-			}
-			if v, ok := payload.InventoryInfo["quantity_damaged"].(float64); ok {
-				qtyDamaged = v
-			}
-			if v, ok := payload.InventoryInfo["reorder_level"].(float64); ok {
-				reorderLevel = v
-			}
-			if v, ok := payload.InventoryInfo["reorder_quantity"].(float64); ok {
-				reorderQty = v
-			}
-			if v, ok := payload.InventoryInfo["track_inventory"].(bool); ok {
-				trackInventory = v
-			}
-		}
-
-		// Extract description
-		var description string
-		if payload.SalesInfo != nil {
-			if v, ok := payload.SalesInfo["description"].(string); ok {
-				description = v
-			}
+		if payload.CreatedBy != "" {
+			createdBy = &payload.CreatedBy
 		}
 
 		rm := domain.ItemRM{
-			ID:                itemID,
-			OrganizationID:    orgID,
-			SKU:               payload.SKU,
-			Name:              payload.Name,
-			Description:       description,
-			ItemType:          itemType,
-			Status:            payload.Status,
-			SellingPrice:      sellingPrice,
-			CostPrice:         costPrice,
-			Currency:          currency,
-			Unit:              unit,
-			QuantityOnHand:    qtyOnHand,
-			QuantityAvailable: qtyAvailable,
-			QuantityReserved:  qtyReserved,
-			QuantityDamaged:   qtyDamaged,
-			ReorderLevel:      reorderLevel,
-			ReorderQuantity:   reorderQty,
-			TrackInventory:    trackInventory,
-			Taxable:           taxable,
-			TaxRate:           taxRate,
-			UpdatedAt:         event.Metadata.OccurredAt,
+			ID:               itemID,
+			OrganizationID:   orgID,
+			SKU:              payload.SKU,
+			Name:             payload.Name,
+			Description:      payload.Description,
+			Type:             payload.Type,
+			Status:           payload.Status,
+			UnitID:           payload.UnitID,
+			Dimensions:       domain.JSONB(payload.Dimensions),
+			Weight:           domain.JSONB(payload.Weight),
+			ManufacturerID:   payload.ManufacturerID,
+			BrandID:          brandID,
+			BarCode:          payload.BarCode,
+			UPC:              payload.UPC,
+			EAN:              payload.EAN,
+			ISBN:             payload.ISBN,
+			MPN:              payload.MPN,
+			SalesInfo:        domain.JSONB(payload.SalesInfo),
+			PurchaseInfo:     domain.JSONB(payload.PurchaseInfo),
+			InventoryInfo:    domain.JSONB(payload.InventoryInfo),
+			ServiceInfo:      domain.JSONB(payload.ServiceInfo),
+			CRMProductInfo:   domain.JSONB(payload.CRMProductInfo),
+			CRMFields:        domain.JSONB(payload.CRMFields),
+			CRMServiceFields: domain.JSONB(payload.CRMServiceFields),
+			CreatedBy:        createdBy,
+			CreatedAt:        event.Metadata.OccurredAt,
+			UpdatedAt:        event.Metadata.OccurredAt,
+			CategoryID:       categoryID,
+			SyncedAt:         event.Metadata.OccurredAt,
 		}
 
 		return tx.Clauses(clause.OnConflict{
@@ -655,96 +910,89 @@ func (h *EventHandler) handleItemEvent(tx *gorm.DB, event *shared_events.BaseEve
 			return false
 		}
 
-		// Basic fields
+		if payload.SKU != "" || isUpdated("sku") {
+			updates["sku"] = payload.SKU
+		}
 		if payload.Name != "" || isUpdated("name") {
 			updates["name"] = payload.Name
 		}
-		if payload.SKU != "" || isUpdated("sku") {
-			updates["sku"] = payload.SKU
+		if payload.Description != "" || isUpdated("description") {
+			updates["description"] = payload.Description
+		}
+		if payload.Type != "" || isUpdated("type") {
+			updates["type"] = payload.Type
 		}
 		if payload.Status != "" || isUpdated("status") {
 			updates["status"] = payload.Status
 		}
-
-		// Item type
-		if payload.Type != "" || isUpdated("type") {
-			if payload.Type == "service" {
-				updates["item_type"] = "service"
-			} else if payload.Type == "goods" {
-				updates["item_type"] = "goods"
+		if payload.UnitID != nil || isUpdated("unit_id") {
+			updates["unit_id"] = payload.UnitID
+		}
+		if payload.Dimensions != nil || isUpdated("dimensions") {
+			updates["dimensions"] = domain.JSONB(payload.Dimensions)
+		}
+		if payload.Weight != nil || isUpdated("weight") {
+			updates["weight"] = domain.JSONB(payload.Weight)
+		}
+		if payload.ManufacturerID != nil || isUpdated("manufacturer_id") {
+			updates["manufacturer_id"] = payload.ManufacturerID
+		}
+		if payload.BrandID != nil || isUpdated("brand_id") {
+			if payload.BrandID != nil && *payload.BrandID != "" {
+				updates["brand_id"] = payload.BrandID
 			} else {
-				updates["item_type"] = "part"
+				updates["brand_id"] = nil
 			}
 		}
-
-		// Sales info (pricing and tax)
+		if payload.BarCode != "" || isUpdated("bar_code") {
+			updates["bar_code"] = payload.BarCode
+		}
+		if payload.UPC != "" || isUpdated("upc") {
+			updates["upc"] = payload.UPC
+		}
+		if payload.EAN != "" || isUpdated("ean") {
+			updates["ean"] = payload.EAN
+		}
+		if payload.ISBN != "" || isUpdated("isbn") {
+			updates["isbn"] = payload.ISBN
+		}
+		if payload.MPN != "" || isUpdated("mpn") {
+			updates["mpn"] = payload.MPN
+		}
 		if payload.SalesInfo != nil || isUpdated("sales_info") {
-			if payload.SalesInfo != nil {
-				if v, ok := payload.SalesInfo["selling_price"].(float64); ok {
-					updates["selling_price"] = v
-				}
-				if v, ok := payload.SalesInfo["rate"].(float64); ok {
-					if _, exists := updates["selling_price"]; !exists {
-						updates["selling_price"] = v
-					}
-				}
-				if v, ok := payload.SalesInfo["selling_currency"].(string); ok {
-					updates["currency"] = v
-				}
-				if v, ok := payload.SalesInfo["description"].(string); ok {
-					updates["description"] = v
-				}
-				if v, ok := payload.SalesInfo["taxable"].(bool); ok {
-					updates["taxable"] = v
-				}
-				if v, ok := payload.SalesInfo["tax_rate"].(float64); ok {
-					updates["tax_rate"] = v
-				}
-			}
+			updates["sales_info"] = domain.JSONB(payload.SalesInfo)
 		}
-
-		// Purchase info
 		if payload.PurchaseInfo != nil || isUpdated("purchase_info") {
-			if payload.PurchaseInfo != nil {
-				if v, ok := payload.PurchaseInfo["cost_price"].(float64); ok {
-					updates["cost_price"] = v
-				}
-				if v, ok := payload.PurchaseInfo["cost_currency"].(string); ok {
-					if _, exists := updates["currency"]; !exists {
-						updates["currency"] = v
-					}
-				}
+			updates["purchase_info"] = domain.JSONB(payload.PurchaseInfo)
+		}
+		if payload.InventoryInfo != nil || isUpdated("inventory_info") {
+			updates["inventory_info"] = domain.JSONB(payload.InventoryInfo)
+		}
+		if payload.ServiceInfo != nil || isUpdated("service_info") {
+			updates["service_info"] = domain.JSONB(payload.ServiceInfo)
+		}
+		if payload.CRMProductInfo != nil || isUpdated("crm_product_info") {
+			updates["crm_product_info"] = domain.JSONB(payload.CRMProductInfo)
+		}
+		if payload.CRMFields != nil || isUpdated("crm_fields") {
+			updates["crm_fields"] = domain.JSONB(payload.CRMFields)
+		}
+		if payload.CRMServiceFields != nil || isUpdated("crm_service_fields") {
+			updates["crm_service_fields"] = domain.JSONB(payload.CRMServiceFields)
+		}
+		if payload.CategoryID != "" || isUpdated("category_id") {
+			if payload.CategoryID != "" {
+				updates["category_id"] = &payload.CategoryID
+			} else {
+				updates["category_id"] = nil
 			}
 		}
-
-		// Inventory info
-		if payload.InventoryInfo != nil || isUpdated("inventory_info") {
-			if payload.InventoryInfo != nil {
-				if v, ok := payload.InventoryInfo["quantity_on_hand"].(float64); ok {
-					updates["quantity_on_hand"] = v
-				}
-				if v, ok := payload.InventoryInfo["quantity_available"].(float64); ok {
-					updates["quantity_available"] = v
-				}
-				if v, ok := payload.InventoryInfo["quantity_reserved"].(float64); ok {
-					updates["quantity_reserved"] = v
-				}
-				if v, ok := payload.InventoryInfo["quantity_damaged"].(float64); ok {
-					updates["quantity_damaged"] = v
-				}
-				if v, ok := payload.InventoryInfo["reorder_level"].(float64); ok {
-					updates["reorder_level"] = v
-				}
-				if v, ok := payload.InventoryInfo["reorder_quantity"].(float64); ok {
-					updates["reorder_quantity"] = v
-				}
-				if v, ok := payload.InventoryInfo["track_inventory"].(bool); ok {
-					updates["track_inventory"] = v
-				}
-			}
+		if payload.UpdatedBy != "" {
+			updates["updated_by"] = &payload.UpdatedBy
 		}
 
 		updates["updated_at"] = event.Metadata.OccurredAt
+		updates["synced_at"] = event.Metadata.OccurredAt
 
 		return tx.Model(&domain.ItemRM{}).Where("id = ?", itemID).Updates(updates).Error
 
@@ -754,7 +1002,12 @@ func (h *EventHandler) handleItemEvent(tx *gorm.DB, event *shared_events.BaseEve
 			return err
 		}
 		id, _ := uuid.Parse(payload.ItemID)
-		return tx.Delete(&domain.ItemRM{}, "id = ?", id).Error
+		now := event.Metadata.OccurredAt
+		return tx.Model(&domain.ItemRM{}).Where("id = ?", id).Updates(map[string]interface{}{
+			"deleted_at": &now,
+			"updated_at": now,
+			"synced_at":  now,
+		}).Error
 
 	default:
 		return nil
@@ -786,7 +1039,9 @@ func (h *EventHandler) handleOrganizationEvent(tx *gorm.DB, event *shared_events
 			Currency:         payload.Currency,
 			Timezone:         payload.Timezone,
 			IsActive:         payload.Status == "active",
+			CreatedAt:        event.Metadata.OccurredAt,
 			UpdatedAt:        event.Metadata.OccurredAt,
+			SyncedAt:         event.Metadata.OccurredAt,
 		}
 
 		return tx.Clauses(clause.OnConflict{
@@ -853,6 +1108,7 @@ func (h *EventHandler) handleOrganizationEvent(tx *gorm.DB, event *shared_events
 		}
 
 		updates["updated_at"] = event.Metadata.OccurredAt
+		updates["synced_at"] = event.Metadata.OccurredAt
 
 		return tx.Model(&domain.OrganizationRM{}).Where("id = ?", id).Updates(updates).Error
 
@@ -863,6 +1119,604 @@ func (h *EventHandler) handleOrganizationEvent(tx *gorm.DB, event *shared_events
 		}
 		id, _ := uuid.Parse(payload.OrganizationID)
 		return tx.Delete(&domain.OrganizationRM{}, "id = ?", id).Error
+
+	default:
+		return nil
+	}
+}
+
+func (h *EventHandler) handleAddressEvent(tx *gorm.DB, event *shared_events.BaseEvent) error {
+	switch event.Metadata.EventType {
+	case shared_events.AddressCreated:
+		var payload shared_events.AddressCreatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		addressID, _ := uuid.Parse(payload.AddressID)
+		orgID, _ := uuid.Parse(payload.OrganizationID)
+		
+		var customerID *uuid.UUID
+		if payload.CompanyID != nil && *payload.CompanyID != "" {
+			if parsed, err := uuid.Parse(*payload.CompanyID); err == nil {
+				customerID = &parsed
+			}
+		}
+
+		var contactID *uuid.UUID
+		if payload.ContactID != nil && *payload.ContactID != "" {
+			if parsed, err := uuid.Parse(*payload.ContactID); err == nil {
+				contactID = &parsed
+			}
+		}
+
+		attention := payload.Attention
+		if attention == "" && payload.Name != "" {
+			attention = payload.Name
+		}
+
+		rm := domain.AddressReadOnly{
+			ID:              addressID,
+			OrganizationID:  orgID,
+			CustomerID:      customerID,
+			ContactID:       contactID,
+			Attention:       attention,
+			Type:            payload.AddressType,
+			Street1:         payload.Street1,
+			Street2:         payload.Street2,
+			City:            payload.City,
+			State:           payload.State,
+			PostalCode:      payload.PostalCode,
+			Country:         payload.Country,
+			Phone:           payload.Phone,
+			Fax:             payload.Fax,
+			IsDefault:       payload.IsDefault,
+			IsPrimary:       payload.IsDefault,
+			Territory:       payload.Territory,
+			Latitude:        payload.Latitude,
+			Longitude:       payload.Longitude,
+			NormalizedHash:  payload.NormalizedHash,
+			GeocodingStatus: payload.GeocodingStatus,
+			Status:          "active",
+			SyncedAt:        event.Metadata.OccurredAt,
+		}
+
+		return tx.Clauses(clause.OnConflict{
+			UpdateAll: true,
+		}).Create(&rm).Error
+
+	case shared_events.AddressUpdated:
+		var payload shared_events.AddressUpdatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		addressID, _ := uuid.Parse(payload.AddressID)
+
+		updates := make(map[string]interface{})
+
+		isUpdated := func(field string) bool {
+			for _, f := range payload.UpdatedFields {
+				if f == field {
+					return true
+				}
+			}
+			return false
+		}
+
+		if payload.AddressType != "" || isUpdated("address_type") {
+			updates["type"] = payload.AddressType
+		}
+		
+		attention := payload.Attention
+		if attention == "" && payload.Name != "" {
+			attention = payload.Name
+		}
+		if attention != "" || isUpdated("attention") || isUpdated("name") {
+			updates["attention"] = attention
+		}
+
+		if payload.Street1 != "" || isUpdated("street1") {
+			updates["street1"] = payload.Street1
+		}
+		if payload.Street2 != "" || isUpdated("street2") {
+			updates["street2"] = payload.Street2
+		}
+		if payload.City != "" || isUpdated("city") {
+			updates["city"] = payload.City
+		}
+		if payload.State != "" || isUpdated("state") {
+			updates["state"] = payload.State
+		}
+		if payload.PostalCode != "" || isUpdated("postal_code") {
+			updates["postal_code"] = payload.PostalCode
+		}
+		if payload.Country != "" || isUpdated("country") {
+			updates["country"] = payload.Country
+		}
+		if payload.Phone != "" || isUpdated("phone") {
+			updates["phone"] = payload.Phone
+		}
+		if payload.Fax != "" || isUpdated("fax") {
+			updates["fax"] = payload.Fax
+		}
+		if payload.Territory != "" || isUpdated("territory") {
+			updates["territory"] = payload.Territory
+		}
+		if payload.Latitude != nil || isUpdated("latitude") {
+			updates["latitude"] = payload.Latitude
+		}
+		if payload.Longitude != nil || isUpdated("longitude") {
+			updates["longitude"] = payload.Longitude
+		}
+		if payload.NormalizedHash != "" || isUpdated("normalized_hash") {
+			updates["normalized_hash"] = payload.NormalizedHash
+		}
+		if payload.GeocodingStatus != "" || isUpdated("geocoding_status") {
+			updates["geocoding_status"] = payload.GeocodingStatus
+		}
+
+		if payload.CompanyID != nil {
+			if *payload.CompanyID == "" {
+				updates["customer_id"] = nil
+			} else if parsed, err := uuid.Parse(*payload.CompanyID); err == nil {
+				updates["customer_id"] = &parsed
+			}
+		}
+		if payload.ContactID != nil {
+			if *payload.ContactID == "" {
+				updates["contact_id"] = nil
+			} else if parsed, err := uuid.Parse(*payload.ContactID); err == nil {
+				updates["contact_id"] = &parsed
+			}
+		}
+		if payload.IsDefault != nil {
+			updates["is_default"] = *payload.IsDefault
+			updates["is_primary"] = *payload.IsDefault
+		}
+
+		updates["synced_at"] = event.Metadata.OccurredAt
+
+		return tx.Model(&domain.AddressReadOnly{}).Where("id = ?", addressID).Updates(updates).Error
+
+	case shared_events.AddressDeleted:
+		var payload shared_events.AddressDeletedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		addressID, _ := uuid.Parse(payload.AddressID)
+		return tx.Delete(&domain.AddressReadOnly{}, "id = ?", addressID).Error
+
+	default:
+		return nil
+	}
+}
+
+func (h *EventHandler) handleServiceCategoryEvent(tx *gorm.DB, event *shared_events.BaseEvent) error {
+	switch event.Metadata.EventType {
+	case shared_events.ServiceCategoryCreated:
+		var payload shared_events.ServiceCategoryCreatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		id, _ := uuid.Parse(payload.ID)
+		orgID, _ := uuid.Parse(payload.OrganizationID)
+
+		createdAt := payload.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = event.Metadata.OccurredAt
+		}
+
+		rm := domain.ServiceCategoryReadOnly{
+			ID:             id,
+			OrganizationID: orgID,
+			CategoryName:   payload.CategoryName,
+			CategoryCode:   payload.CategoryCode,
+			Description:    payload.Description,
+			Type:           payload.Type,
+			ImagePath:      payload.ImagePath,
+			Status:         payload.Status,
+			CreatedAt:      createdAt,
+			UpdatedAt:      createdAt,
+			SyncedAt:       event.Metadata.OccurredAt,
+		}
+
+		return tx.Clauses(clause.OnConflict{
+			UpdateAll: true,
+		}).Create(&rm).Error
+
+	case shared_events.ServiceCategoryUpdated:
+		var payload shared_events.ServiceCategoryUpdatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		id, _ := uuid.Parse(payload.ID)
+
+		updates := make(map[string]interface{})
+
+		isUpdated := func(field string) bool {
+			for _, f := range payload.UpdatedFields {
+				if f == field {
+					return true
+				}
+			}
+			return false
+		}
+
+		if payload.CategoryName != "" || isUpdated("category_name") {
+			updates["category_name"] = payload.CategoryName
+		}
+		if payload.CategoryCode != "" || isUpdated("category_code") {
+			updates["category_code"] = payload.CategoryCode
+		}
+		if payload.Description != "" || isUpdated("description") {
+			updates["description"] = payload.Description
+		}
+		if payload.Type != "" || isUpdated("type") {
+			updates["type"] = payload.Type
+		}
+		if payload.ImagePath != "" || isUpdated("image_path") {
+			updates["image_path"] = payload.ImagePath
+		}
+		if payload.Status != "" || isUpdated("status") {
+			updates["status"] = payload.Status
+		}
+
+		updatedAt := payload.UpdatedAt
+		if updatedAt.IsZero() {
+			updatedAt = event.Metadata.OccurredAt
+		}
+		updates["updated_at"] = updatedAt
+		updates["synced_at"] = event.Metadata.OccurredAt
+
+		return tx.Model(&domain.ServiceCategoryReadOnly{}).Where("id = ?", id).Updates(updates).Error
+
+	case shared_events.ServiceCategoryDeleted:
+		var payload shared_events.ServiceCategoryDeletedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		id, _ := uuid.Parse(payload.ID)
+		now := event.Metadata.OccurredAt
+		return tx.Model(&domain.ServiceCategoryReadOnly{}).Where("id = ?", id).Updates(map[string]interface{}{
+			"deleted_at": &now,
+			"synced_at":  now,
+		}).Error
+
+	default:
+		return nil
+	}
+}
+
+func (h *EventHandler) handleAppointmentEvent(tx *gorm.DB, event *shared_events.BaseEvent) error {
+	switch event.Metadata.EventType {
+	case shared_events.AppointmentCreated,
+		shared_events.AppointmentUpdated,
+		shared_events.AppointmentAssigned,
+		shared_events.AppointmentStarted,
+		shared_events.AppointmentCompleted,
+		shared_events.AppointmentCancelled,
+		shared_events.AppointmentTerminated,
+		shared_events.AppointmentRescheduled:
+
+		var payload struct {
+			shared_events.AppointmentPayload
+		}
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		id, err := uuid.Parse(payload.AppointmentID)
+		if err != nil {
+			return fmt.Errorf("invalid appointment ID %s: %w", payload.AppointmentID, err)
+		}
+		orgID, err := uuid.Parse(payload.OrganizationID)
+		if err != nil {
+			return fmt.Errorf("invalid organization ID %s: %w", payload.OrganizationID, err)
+		}
+		woID, err := uuid.Parse(payload.WorkOrderID)
+		if err != nil {
+			return fmt.Errorf("invalid work order ID %s: %w", payload.WorkOrderID, err)
+		}
+
+		var customerID *uuid.UUID // not in Kafka payload
+
+		var assignedTechnicianID *uuid.UUID
+		if payload.AssignedTechnicianID != nil && *payload.AssignedTechnicianID != "" {
+			if parsed, err := uuid.Parse(*payload.AssignedTechnicianID); err == nil {
+				assignedTechnicianID = &parsed
+			}
+		}
+
+		var assignedCrewID *uuid.UUID
+		if payload.AssignedCrewID != nil && *payload.AssignedCrewID != "" {
+			if parsed, err := uuid.Parse(*payload.AssignedCrewID); err == nil {
+				assignedCrewID = &parsed
+			}
+		}
+
+		var serviceAddressID *uuid.UUID
+		if payload.ServiceAddressID != nil && *payload.ServiceAddressID != "" {
+			if parsed, err := uuid.Parse(*payload.ServiceAddressID); err == nil {
+				serviceAddressID = &parsed
+			}
+		}
+
+		var billingAddressID *uuid.UUID
+		if payload.BillingAddressID != nil && *payload.BillingAddressID != "" {
+			if parsed, err := uuid.Parse(*payload.BillingAddressID); err == nil {
+				billingAddressID = &parsed
+			}
+		}
+
+		rm := domain.ServiceAppointmentRM{
+			ID:                   id,
+			OrganizationID:       orgID,
+			WorkOrderID:          woID,
+			CustomerID:           customerID,
+			AppointmentNumber:    payload.AppointmentNumber,
+			Subject:              "", // not in Kafka payload
+			ScheduledDate:        payload.ScheduledDate,
+			ScheduledTime:        "", // not in Kafka payload
+			ScheduledStartTime:   payload.ScheduledStartTime,
+			ScheduledEndTime:     payload.ScheduledEndTime,
+			Duration:             payload.Duration,
+			Status:               payload.Status,
+			ActualStartTime:      payload.ActualStartTime,
+			ActualEndTime:        payload.ActualEndTime,
+			StartLatitude:        nil, // not in Kafka payload
+			StartLongitude:       nil, // not in Kafka payload
+			EndLatitude:          nil, // not in Kafka payload
+			EndLongitude:         nil, // not in Kafka payload
+			AssignedTechnicianID: assignedTechnicianID,
+			AssignedCrewID:       assignedCrewID,
+			ServiceAddressID:     serviceAddressID,
+			BillingAddressID:     billingAddressID,
+			Notes:                payload.Notes,
+			CreatedAt:            event.Metadata.OccurredAt,
+			UpdatedAt:            event.Metadata.OccurredAt,
+			SyncedAt:             event.Metadata.OccurredAt,
+		}
+
+		if err := tx.Clauses(clause.OnConflict{
+			UpdateAll: true,
+		}).Create(&rm).Error; err != nil {
+			return err
+		}
+
+		// Delete existing resources first (hard delete to cleanly recreate)
+		if err := tx.Where("service_appointment_id = ?", id).Delete(&domain.ServiceAppointmentResourceRM{}).Error; err != nil {
+			return err
+		}
+
+		// Insert new resources if any
+		if len(payload.Resources) > 0 {
+			for _, res := range payload.Resources {
+				resID, err := uuid.Parse(res.ID)
+				if err != nil {
+					continue
+				}
+				resOrgID, _ := uuid.Parse(res.OrganizationID)
+				resApptID, _ := uuid.Parse(res.ServiceAppointmentID)
+				resourceID, err := uuid.Parse(res.ResourceID)
+				if err != nil {
+					continue
+				}
+
+				sar := domain.ServiceAppointmentResourceRM{
+					ID:                   resID,
+					OrganizationID:       resOrgID,
+					ServiceAppointmentID: resApptID,
+					ResourceType:         res.ResourceType,
+					ResourceID:           resourceID,
+					StartTime:            res.StartTime,
+					EndTime:              res.EndTime,
+					CreatedAt:            event.Metadata.OccurredAt,
+					UpdatedAt:            event.Metadata.OccurredAt,
+					SyncedAt:             event.Metadata.OccurredAt,
+				}
+				if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&sar).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+
+	case shared_events.AppointmentDeleted:
+		var payload shared_events.AppointmentDeletedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		id, err := uuid.Parse(payload.AppointmentID)
+		if err != nil {
+			return fmt.Errorf("invalid deleted appointment ID %s: %w", payload.AppointmentID, err)
+		}
+
+		// Delete resources first
+		if err := tx.Where("service_appointment_id = ?", id).Delete(&domain.ServiceAppointmentResourceRM{}).Error; err != nil {
+			return err
+		}
+
+		// Soft delete appointment
+		now := event.Metadata.OccurredAt
+		return tx.Model(&domain.ServiceAppointmentRM{}).Where("id = ?", id).Updates(map[string]interface{}{
+			"deleted_at": &now,
+			"synced_at":  now,
+		}).Error
+
+	default:
+		return nil
+	}
+}
+
+func (h *EventHandler) handleUserEvent(tx *gorm.DB, event *shared_events.BaseEvent) error {
+	switch event.Metadata.EventType {
+	case shared_events.UserRegistered:
+		var payload shared_events.UserRegisteredPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		var emailVerified bool
+		if payload.IsActive {
+			emailVerified = true
+		}
+
+		rm := domain.UserReadOnly{
+			ID:               payload.UserID,
+			Email:            payload.Email,
+			FirstName:        payload.FirstName,
+			LastName:         payload.LastName,
+			FullName:         payload.FullName,
+			Role:             payload.Role,
+			OrganizationName: payload.OrganizationName,
+			UserType:         payload.UserType,
+			ProfilePhotoURL:  payload.ProfilePhotoURL,
+			EmailVerified:    &emailVerified,
+			IsActive:         &payload.IsActive,
+			CreatedAt:        payload.CreatedAt,
+			UpdatedAt:        payload.UpdatedAt,
+			SyncedAt:         event.Metadata.OccurredAt,
+		}
+
+		if payload.OrganizationID != "" {
+			rm.OrganizationID = &payload.OrganizationID
+		}
+		if payload.ProfileID != "" {
+			rm.ProfileID = &payload.ProfileID
+		}
+		if payload.EmployeeID != "" {
+			rm.EmployeeID = &payload.EmployeeID
+		}
+		if payload.WorkforceUserID != "" {
+			rm.WorkforceUserID = &payload.WorkforceUserID
+		}
+		if payload.CustomerID != "" {
+			rm.CustomerID = &payload.CustomerID
+		}
+		if payload.PhoneNumber != "" {
+			rm.PhoneNumber = &payload.PhoneNumber
+		}
+
+		return tx.Clauses(clause.OnConflict{
+			UpdateAll: true,
+		}).Create(&rm).Error
+
+	case shared_events.UserUpdated:
+		var payload shared_events.UserUpdatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		updates := make(map[string]interface{})
+		isUpdated := func(field string) bool {
+			for _, f := range payload.UpdatedFields {
+				if f == field {
+					return true
+				}
+			}
+			return false
+		}
+
+		if payload.Email != "" || isUpdated("email") {
+			updates["email"] = payload.Email
+		}
+		if payload.FirstName != "" || isUpdated("first_name") {
+			updates["first_name"] = payload.FirstName
+		}
+		if payload.LastName != "" || isUpdated("last_name") {
+			updates["last_name"] = payload.LastName
+		}
+		if payload.FullName != "" || isUpdated("full_name") {
+			updates["full_name"] = payload.FullName
+		}
+		if payload.Role != "" || isUpdated("role") {
+			updates["role"] = payload.Role
+		}
+		if payload.OrganizationID != "" || isUpdated("organization_id") {
+			updates["organization_id"] = &payload.OrganizationID
+		}
+		if payload.OrganizationName != "" || isUpdated("organization_name") {
+			updates["organization_name"] = payload.OrganizationName
+		}
+		if payload.ProfileID != "" || isUpdated("profile_id") {
+			updates["profile_id"] = &payload.ProfileID
+		}
+		if payload.EmployeeID != "" || isUpdated("employee_id") {
+			updates["employee_id"] = &payload.EmployeeID
+		}
+		if payload.WorkforceUserID != "" || isUpdated("workforce_user_id") {
+			updates["workforce_user_id"] = &payload.WorkforceUserID
+		}
+		if payload.CustomerID != "" || isUpdated("customer_id") {
+			updates["customer_id"] = &payload.CustomerID
+		}
+		if payload.UserType != "" || isUpdated("user_type") {
+			updates["user_type"] = payload.UserType
+		}
+		if payload.ProfilePhotoURL != "" || isUpdated("profile_photo_url") {
+			updates["profile_photo_url"] = payload.ProfilePhotoURL
+		}
+		if payload.PhoneNumber != "" || isUpdated("phone_number") {
+			updates["phone_number"] = &payload.PhoneNumber
+		}
+		if payload.IsActive != nil || isUpdated("is_active") {
+			updates["is_active"] = payload.IsActive
+		}
+
+		updates["updated_at"] = event.Metadata.OccurredAt
+		updates["synced_at"] = event.Metadata.OccurredAt
+
+		return tx.Model(&domain.UserReadOnly{}).Where("id = ?", payload.UserID).Updates(updates).Error
+
+	case shared_events.UserActivated:
+		var payload shared_events.UserActivatedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		active := true
+		updates := map[string]interface{}{
+			"is_active":  &active,
+			"updated_at": event.Metadata.OccurredAt,
+			"synced_at":  event.Metadata.OccurredAt,
+		}
+		return tx.Model(&domain.UserReadOnly{}).Where("id = ?", payload.UserID).Updates(updates).Error
+
+	case shared_events.UserDeactivated:
+		var payload struct {
+			UserID string `json:"user_id"`
+		}
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		active := false
+		updates := map[string]interface{}{
+			"is_active":  &active,
+			"updated_at": event.Metadata.OccurredAt,
+			"synced_at":  event.Metadata.OccurredAt,
+		}
+		return tx.Model(&domain.UserReadOnly{}).Where("id = ?", payload.UserID).Updates(updates).Error
+
+	case shared_events.UserDeleted:
+		var payload shared_events.UserDeletedPayload
+		if err := shared_events.UnmarshalPayload(event, &payload); err != nil {
+			return err
+		}
+
+		now := event.Metadata.OccurredAt
+		return tx.Model(&domain.UserReadOnly{}).Where("id = ?", payload.UserID).Updates(map[string]interface{}{
+			"deleted_at": &now,
+			"synced_at":  now,
+			"updated_at": now,
+		}).Error
 
 	default:
 		return nil

@@ -38,6 +38,9 @@ type ReadModelRepository interface {
 	GetOrganization(ctx context.Context, id uuid.UUID) (*OrganizationRM, error)
 	SearchWorkOrders(ctx context.Context, orgID uuid.UUID, query string) ([]WorkOrderRM, error)
 	GetWorkOrderByID(ctx context.Context, id uuid.UUID) (*WorkOrderRM, error)
+	GetOrganizationAdminID(ctx context.Context, orgID uuid.UUID) (*uuid.UUID, error)
+	GetServiceAppointments(ctx context.Context, workOrderID uuid.UUID) ([]ServiceAppointmentRM, error)
+	GetTechnicianNamesForAppointment(ctx context.Context, appointmentID uuid.UUID) ([]string, error)
 }
 
 type AuditLogRepository interface {

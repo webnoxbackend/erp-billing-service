@@ -55,6 +55,74 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		sourceSystem = domain.SourceSystem(req.SourceSystem)
 	}
 
+	ownerID := req.OwnerID
+	if ownerID == nil {
+		if adminUUID, err := s.rmRepo.GetOrganizationAdminID(ctx, orgID); err == nil {
+			ownerID = adminUUID
+		}
+	}
+
+	billingAddressID := req.BillingAddressID
+	shippingAddressID := req.ShippingAddressID
+	serviceAddressID := req.ServiceAddressID
+
+	shippingExplicitlyBlank := req.ShippingStreet == "" && req.ShippingCity == "" && req.ShippingState == "" && req.ShippingCode == "" && req.ShippingCountry == ""
+
+	var customerRM *domain.CustomerRM
+	if billingAddressID == nil || shippingAddressID == nil || serviceAddressID == nil {
+		if customer, err := s.rmRepo.GetCustomer(ctx, req.CustomerID); err == nil && customer != nil {
+			customerRM = customer
+			if billingAddressID == nil {
+				billingAddressID = customer.BillingAddressID
+			}
+			// Skip copying customer shipping address ID if the source system is FSM (Work Order) or CRM (Estimate),
+			// or if the shipping fields were explicitly left blank.
+			if shippingAddressID == nil && sourceSystem != domain.SourceSystemFSM && sourceSystem != domain.SourceSystemCRM && !shippingExplicitlyBlank {
+				shippingAddressID = customer.ShippingAddressID
+			}
+			if serviceAddressID == nil {
+				serviceAddressID = customer.ServiceAddressID
+			}
+		}
+	}
+
+	billingStreet := req.BillingStreet
+	billingCity := req.BillingCity
+	billingState := req.BillingState
+	billingCode := req.BillingCode
+	billingCountry := req.BillingCountry
+	shippingStreet := req.ShippingStreet
+	shippingCity := req.ShippingCity
+	shippingState := req.ShippingState
+	shippingCode := req.ShippingCode
+	shippingCountry := req.ShippingCountry
+
+	if billingStreet == "" || shippingStreet == "" {
+		if customerRM == nil {
+			if customer, err := s.rmRepo.GetCustomer(ctx, req.CustomerID); err == nil && customer != nil {
+				customerRM = customer
+			}
+		}
+		if customerRM != nil {
+			if billingStreet == "" {
+				billingStreet = customerRM.BillingStreet
+				billingCity = customerRM.BillingCity
+				billingState = customerRM.BillingState
+				billingCode = customerRM.BillingCode
+				billingCountry = customerRM.BillingCountry
+			}
+			// Skip copying customer shipping details if the source system is FSM (Work Order) or CRM (Estimate),
+			// or if the shipping fields were explicitly left blank.
+			if shippingStreet == "" && sourceSystem != domain.SourceSystemFSM && sourceSystem != domain.SourceSystemCRM && !shippingExplicitlyBlank {
+				shippingStreet = customerRM.ShippingStreet
+				shippingCity = customerRM.ShippingCity
+				shippingState = customerRM.ShippingState
+				shippingCode = customerRM.ShippingCode
+				shippingCountry = customerRM.ShippingCountry
+			}
+		}
+	}
+
 	invoiceID := uuid.New()
 	invoice := &domain.Invoice{
 		ID:             invoiceID,
@@ -66,10 +134,11 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		SourceReferenceID: req.SourceReferenceID,
 
 		ContactID:       req.ContactID,
-		OwnerID:         req.OwnerID,
+		OwnerID:         ownerID,
 		Subject:         req.Subject,
 		InvoiceNumber:   nil, // NOT generated on creation - only on SEND
 		ReferenceNo:     req.ReferenceNo,
+		PaymentTerms:    req.PaymentTerms,
 		InvoiceDate:     req.InvoiceDate,
 		DueDate:         req.DueDate,
 		Status:          domain.InvoiceStatusDraft,
@@ -77,21 +146,25 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		Adjustment:      req.Adjustment,
 		ExciseDuty:      req.ExciseDuty,
 		SalesCommission: req.SalesCommission,
-		SalesOrder:      req.SalesOrder,
-		SalesOrderID:    req.SalesOrderID,
-		PurchaseOrder:   req.PurchaseOrder,
+		SalesOrderID:      req.SalesOrderID,
+		SalesOrder:        req.SalesOrder,
+		PurchaseOrder:     req.PurchaseOrder,
+		ServiceCategoryID: req.ServiceCategoryID,
 		Terms:           req.Terms,
 		Notes:           req.Notes,
-		BillingStreet:   req.BillingStreet,
-		BillingCity:     req.BillingCity,
-		BillingState:    req.BillingState,
-		BillingCode:     req.BillingCode,
-		BillingCountry:  req.BillingCountry,
-		ShippingStreet:  req.ShippingStreet,
-		ShippingCity:    req.ShippingCity,
-		ShippingState:   req.ShippingState,
-		ShippingCode:    req.ShippingCode,
-		ShippingCountry: req.ShippingCountry,
+		BillingAddressID:  billingAddressID,
+		ShippingAddressID: shippingAddressID,
+		ServiceAddressID:  serviceAddressID,
+		BillingStreet:   billingStreet,
+		BillingCity:     billingCity,
+		BillingState:    billingState,
+		BillingCode:     billingCode,
+		BillingCountry:  billingCountry,
+		ShippingStreet:  shippingStreet,
+		ShippingCity:    shippingCity,
+		ShippingState:   shippingState,
+		ShippingCode:    shippingCode,
+		ShippingCountry: shippingCountry,
 	}
 
 	// Stock Management - DISABLED for draft invoice creation
@@ -159,18 +232,19 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		}
 
 		items = append(items, domain.InvoiceItem{
-			ID:          uuid.New(),
-			InvoiceID:   invoiceID,
-			ItemID:      itemReq.ItemID,
-			ItemType:    itemReq.ItemType,
-			Name:        itemName,
-			Description: itemReq.Description,
-			Quantity:    itemReq.Quantity,
-			UnitPrice:   itemReq.UnitPrice,
-			Discount:    itemReq.Discount,
-			Tax:         itemReq.Tax,
-			Total:       itemTotal,
-			Metadata:    metadataJSON, // Store module-specific metadata
+			ID:                uuid.New(),
+			InvoiceID:         invoiceID,
+			ItemID:            itemReq.ItemID,
+			ItemType:          itemReq.ItemType,
+			Name:              itemName,
+			Description:       itemReq.Description,
+			Quantity:          itemReq.Quantity,
+			UnitPrice:         itemReq.UnitPrice,
+			Discount:          itemReq.Discount,
+			Tax:               itemReq.Tax,
+			Total:             itemTotal,
+			ServiceCategoryID: itemReq.ServiceCategoryID,
+			Metadata:          metadataJSON, // Store module-specific metadata
 		})
 
 		subTotal += (itemReq.Quantity * itemReq.UnitPrice)
@@ -221,6 +295,65 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uuid.UUID, req dto.CreateInvoiceFromEstimateRequest) (*dto.InvoiceResponse, error) {
 	invoiceID := uuid.New()
 
+	billingAddressID := req.BillingAddressID
+	shippingAddressID := req.ShippingAddressID
+	serviceAddressID := req.ServiceAddressID
+
+	shippingExplicitlyBlank := req.ShippingStreet == "" && req.ShippingCity == "" && req.ShippingState == "" && req.ShippingCode == "" && req.ShippingCountry == ""
+
+	var customerRM *domain.CustomerRM
+	if billingAddressID == nil || shippingAddressID == nil || serviceAddressID == nil {
+		if customer, err := s.rmRepo.GetCustomer(ctx, req.CustomerID); err == nil && customer != nil {
+			customerRM = customer
+			if billingAddressID == nil {
+				billingAddressID = customer.BillingAddressID
+			}
+			// Skip copying customer shipping address ID since the source system is CRM (Estimate)
+			if shippingAddressID == nil && !shippingExplicitlyBlank && false {
+				shippingAddressID = customer.ShippingAddressID
+			}
+			if serviceAddressID == nil {
+				serviceAddressID = customer.ServiceAddressID
+			}
+		}
+	}
+
+	billingStreet := req.BillingStreet
+	billingCity := req.BillingCity
+	billingState := req.BillingState
+	billingCode := req.BillingCode
+	billingCountry := req.BillingCountry
+	shippingStreet := req.ShippingStreet
+	shippingCity := req.ShippingCity
+	shippingState := req.ShippingState
+	shippingCode := req.ShippingCode
+	shippingCountry := req.ShippingCountry
+
+	if billingStreet == "" || shippingStreet == "" {
+		if customerRM == nil {
+			if customer, err := s.rmRepo.GetCustomer(ctx, req.CustomerID); err == nil && customer != nil {
+				customerRM = customer
+			}
+		}
+		if customerRM != nil {
+			if billingStreet == "" {
+				billingStreet = customerRM.BillingStreet
+				billingCity = customerRM.BillingCity
+				billingState = customerRM.BillingState
+				billingCode = customerRM.BillingCode
+				billingCountry = customerRM.BillingCountry
+			}
+			// Skip copying customer shipping details since the source system is CRM (Estimate)
+			if shippingStreet == "" && !shippingExplicitlyBlank && false {
+				shippingStreet = customerRM.ShippingStreet
+				shippingCity = customerRM.ShippingCity
+				shippingState = customerRM.ShippingState
+				shippingCode = customerRM.ShippingCode
+				shippingCountry = customerRM.ShippingCountry
+			}
+		}
+	}
+
 	// Create invoice with CRM source system
 	invoice := &domain.Invoice{
 		ID:                invoiceID,
@@ -238,16 +371,19 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 		Adjustment:        req.Adjustment,
 		Terms:             req.Terms,
 		Notes:             req.Notes,
-		BillingStreet:     req.BillingStreet,
-		BillingCity:       req.BillingCity,
-		BillingState:      req.BillingState,
-		BillingCode:       req.BillingCode,
-		BillingCountry:    req.BillingCountry,
-		ShippingStreet:    req.ShippingStreet,
-		ShippingCity:      req.ShippingCity,
-		ShippingState:     req.ShippingState,
-		ShippingCode:      req.ShippingCode,
-		ShippingCountry:   req.ShippingCountry,
+		BillingAddressID:  billingAddressID,
+		ShippingAddressID: shippingAddressID,
+		ServiceAddressID:  serviceAddressID,
+		BillingStreet:     billingStreet,
+		BillingCity:       billingCity,
+		BillingState:      billingState,
+		BillingCode:       billingCode,
+		BillingCountry:    billingCountry,
+		ShippingStreet:    shippingStreet,
+		ShippingCity:      shippingCity,
+		ShippingState:     shippingState,
+		ShippingCode:      shippingCode,
+		ShippingCountry:   shippingCountry,
 	}
 
 	// Convert estimate items to invoice items
@@ -307,7 +443,7 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 				for _, u := range unavailable {
 					errMsg += fmt.Sprintf("%s (requested: %d, available: %d), ", u.ItemName, u.RequestedQuantity, u.AvailableQuantity)
 				}
-				return nil, fmt.Errorf(errMsg)
+				return nil, fmt.Errorf("%s", errMsg)
 			}
 		}
 	}
@@ -366,6 +502,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 	}
 	invoice.InvoiceDate = req.InvoiceDate
 	invoice.DueDate = req.DueDate
+	invoice.PaymentTerms = req.PaymentTerms
 	invoice.Currency = req.Currency
 	invoice.Adjustment = req.Adjustment
 	invoice.ExciseDuty = req.ExciseDuty
@@ -376,7 +513,11 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 	if req.OwnerID != nil {
 		invoice.OwnerID = req.OwnerID
 	}
+	invoice.ServiceCategoryID = req.ServiceCategoryID
 	invoice.Notes = req.Notes
+	invoice.BillingAddressID = req.BillingAddressID
+	invoice.ShippingAddressID = req.ShippingAddressID
+	invoice.ServiceAddressID = req.ServiceAddressID
 	invoice.BillingStreet = req.BillingStreet
 	invoice.BillingCity = req.BillingCity
 	invoice.BillingState = req.BillingState
@@ -421,18 +562,19 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 		}
 
 		items = append(items, domain.InvoiceItem{
-			ID:          uuid.New(),
-			InvoiceID:   invoice.ID,
-			ItemID:      itemReq.ItemID,
-			ItemType:    itemReq.ItemType,
-			Name:        itemName,
-			Description: itemReq.Description,
-			Quantity:    itemReq.Quantity,
-			UnitPrice:   itemReq.UnitPrice,
-			Discount:    itemReq.Discount,
-			Tax:         itemReq.Tax,
-			Total:       itemTotal,
-			Metadata:    metadataJSON,
+			ID:                uuid.New(),
+			InvoiceID:         invoice.ID,
+			ItemID:            itemReq.ItemID,
+			ItemType:          itemReq.ItemType,
+			Name:              itemName,
+			Description:       itemReq.Description,
+			Quantity:          itemReq.Quantity,
+			UnitPrice:         itemReq.UnitPrice,
+			Discount:          itemReq.Discount,
+			Tax:               itemReq.Tax,
+			Total:             itemTotal,
+			ServiceCategoryID: itemReq.ServiceCategoryID,
+			Metadata:          metadataJSON,
 		})
 
 		subTotal += (itemReq.Quantity * itemReq.UnitPrice)
@@ -500,7 +642,24 @@ func (s *InvoiceService) SendInvoice(ctx context.Context, id uuid.UUID, req dto.
 		}
 	}
 
-	pdfPath, err := s.pdfService.GenerateInvoicePDF(ctx, invoice, customer)
+	org, err := s.rmRepo.GetOrganization(ctx, invoice.OrganizationID)
+	if err != nil || org == nil {
+		fmt.Printf("[WARNING] Organization %s not found for SendInvoice PDF. Using placeholders: %v\n", invoice.OrganizationID, err)
+		org = &domain.OrganizationRM{
+			ID:               invoice.OrganizationID,
+			OrganizationName: "YOUR COMPANY NAME",
+			Address:          "Your Company Address Line 1",
+			City:             "City",
+			State:            "State",
+			ZipCode:          "ZIP",
+			Country:          "Country",
+			Phone:            "(123) 456-7890",
+			Website:          "www.yourcompany.com",
+		}
+	}
+
+	wo, appts, techs := s.getFSMDetails(ctx, invoice)
+	pdfPath, err := s.pdfService.GenerateInvoicePDF(ctx, invoice, customer, org, wo, appts, techs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate PDF: %w", err)
 	}
@@ -650,7 +809,24 @@ func (s *InvoiceService) GetInvoicePDF(ctx context.Context, id uuid.UUID) (strin
 		invoice.InvoiceNumber = &invNum
 	}
 
-	pdfPath, err := s.pdfService.GenerateInvoicePDF(ctx, invoice, customer) // Added ctx
+	org, err := s.rmRepo.GetOrganization(ctx, invoice.OrganizationID)
+	if err != nil || org == nil {
+		fmt.Printf("[WARNING] Organization %s not found for GetInvoicePDF. Using placeholders: %v\n", invoice.OrganizationID, err)
+		org = &domain.OrganizationRM{
+			ID:               invoice.OrganizationID,
+			OrganizationName: "YOUR COMPANY NAME",
+			Address:          "Your Company Address Line 1",
+			City:             "City",
+			State:            "State",
+			ZipCode:          "ZIP",
+			Country:          "Country",
+			Phone:            "(123) 456-7890",
+			Website:          "www.yourcompany.com",
+		}
+	}
+
+	wo, appts, techs := s.getFSMDetails(ctx, invoice)
+	pdfPath, err := s.pdfService.GenerateInvoicePDF(ctx, invoice, customer, org, wo, appts, techs) // Added ctx
 	if err != nil {
 		return "", fmt.Errorf("failed to generate PDF: %w", err)
 	}
@@ -737,10 +913,13 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 		SalesCommission: inv.SalesCommission,
 		SalesOrder:      inv.SalesOrder,
 		PurchaseOrder:   inv.PurchaseOrder,
+		PaymentTerms:    inv.PaymentTerms,
+		Currency:        inv.Currency,
+		ServiceCategoryID: inv.ServiceCategoryID,
 		OwnerID:         inv.OwnerID,
-		CustomerID:      inv.CustomerID,
-		ContactID:       inv.ContactID,
-		InvoiceDate:     ConvertToOrgTZValue(ctx, inv.InvoiceDate, inv.OrganizationID, s.rmRepo),
+		CustomerID:        inv.CustomerID,
+		ContactID:         inv.ContactID,
+		InvoiceDate:       ConvertToOrgTZValue(ctx, inv.InvoiceDate, inv.OrganizationID, s.rmRepo),
 		DueDate:         ConvertToOrgTZValue(ctx, inv.DueDate, inv.OrganizationID, s.rmRepo),
 		CreatedAt:       ConvertToOrgTZValue(ctx, inv.CreatedAt, inv.OrganizationID, s.rmRepo),
 		UpdatedAt:       ConvertToOrgTZValue(ctx, inv.UpdatedAt, inv.OrganizationID, s.rmRepo),
@@ -748,6 +927,9 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 		// PDF path
 		PDFPath: inv.PDFPath,
 
+		BillingAddressID:  inv.BillingAddressID,
+		ShippingAddressID: inv.ShippingAddressID,
+		ServiceAddressID:  inv.ServiceAddressID,
 		BillingStreet:   inv.BillingStreet,
 		BillingCity:     inv.BillingCity,
 		BillingState:    inv.BillingState,
@@ -817,15 +999,16 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 		res.Items = make([]dto.ItemResponse, 0, len(inv.Items))
 		for _, item := range inv.Items {
 			itemResp := dto.ItemResponse{
-				ItemID:      item.ItemID,
-				ItemType:    item.ItemType,
-				Name:        item.Name,
-				Description: item.Description,
-				Quantity:    item.Quantity,
-				UnitPrice:   item.UnitPrice,
-				Discount:    item.Discount,
-				Tax:         item.Tax,
-				Total:       item.Total,
+				ItemID:            item.ItemID,
+				ItemType:          item.ItemType,
+				Name:              item.Name,
+				Description:       item.Description,
+				Quantity:          item.Quantity,
+				UnitPrice:         item.UnitPrice,
+				Discount:          item.Discount,
+				Tax:               item.Tax,
+				Total:             item.Total,
+				ServiceCategoryID: item.ServiceCategoryID,
 			}
 
 			// Deserialize metadata if present
@@ -901,4 +1084,65 @@ func (s *InvoiceService) GetAuditLogs(ctx context.Context, invoiceID uuid.UUID) 
 	}
 
 	return responses, nil
+}
+
+func (s *InvoiceService) getFSMDetails(ctx context.Context, invoice *domain.Invoice) (*domain.WorkOrderRM, []domain.ServiceAppointmentRM, []string) {
+	var workOrder *domain.WorkOrderRM
+	var appointments []domain.ServiceAppointmentRM
+	var technicians []string
+
+	if invoice.SourceSystem == domain.SourceSystemFSM && invoice.SourceReferenceID != nil {
+		if woID, err := uuid.Parse(*invoice.SourceReferenceID); err == nil {
+			if wo, err := s.rmRepo.GetWorkOrderByID(ctx, woID); err == nil {
+				workOrder = wo
+				if workOrder != nil {
+					if workOrder.DueDate != nil {
+						localDue := ConvertToOrgTZValue(ctx, *workOrder.DueDate, invoice.OrganizationID, s.rmRepo)
+						workOrder.DueDate = &localDue
+					}
+					workOrder.CreatedAt = ConvertToOrgTZValue(ctx, workOrder.CreatedAt, invoice.OrganizationID, s.rmRepo)
+				}
+			}
+			if appts, err := s.rmRepo.GetServiceAppointments(ctx, woID); err == nil {
+				appointments = appts
+				for i := range appointments {
+					appt := &appointments[i]
+					appt.ScheduledDate = ConvertToOrgTZValue(ctx, appt.ScheduledDate, invoice.OrganizationID, s.rmRepo)
+					if appt.ScheduledStartTime != nil {
+						localStart := ConvertToOrgTZValue(ctx, *appt.ScheduledStartTime, invoice.OrganizationID, s.rmRepo)
+						appt.ScheduledStartTime = &localStart
+					}
+					if appt.ScheduledEndTime != nil {
+						localEnd := ConvertToOrgTZValue(ctx, *appt.ScheduledEndTime, invoice.OrganizationID, s.rmRepo)
+						appt.ScheduledEndTime = &localEnd
+					}
+					if appt.ActualStartTime != nil {
+						localActStart := ConvertToOrgTZValue(ctx, *appt.ActualStartTime, invoice.OrganizationID, s.rmRepo)
+						appt.ActualStartTime = &localActStart
+					}
+					if appt.ActualEndTime != nil {
+						localActEnd := ConvertToOrgTZValue(ctx, *appt.ActualEndTime, invoice.OrganizationID, s.rmRepo)
+						appt.ActualEndTime = &localActEnd
+					}
+
+					if names, err := s.rmRepo.GetTechnicianNamesForAppointment(ctx, appt.ID); err == nil {
+						appt.TechnicianNames = names
+						for _, name := range names {
+							exists := false
+							for _, ext := range technicians {
+								if ext == name {
+									exists = true
+									break
+								}
+							}
+							if !exists {
+								technicians = append(technicians, name)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return workOrder, appointments, technicians
 }
