@@ -833,9 +833,11 @@ func (s *InvoiceService) GetInvoicePDF(ctx context.Context, id uuid.UUID) (strin
 
 	// 5. Update invoice with PDF path (only for non-draft invoices)
 	if invoice.Status != domain.InvoiceStatusDraft {
-		invoice.PDFPath = &pdfPath
-		if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
-			return "", fmt.Errorf("failed to update invoice with PDF path: %w", err)
+		if invoice.PDFPath == nil || *invoice.PDFPath != pdfPath {
+			invoice.PDFPath = &pdfPath
+			if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
+				return "", fmt.Errorf("failed to update invoice with PDF path: %w", err)
+			}
 		}
 	}
 
