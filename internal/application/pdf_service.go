@@ -33,7 +33,7 @@ func (s *PDFService) GenerateInvoicePDF(
 	organization *domain.OrganizationRM,
 	workOrder *domain.WorkOrderRM,
 	appointments []domain.ServiceAppointmentRM,
-	technicians []string,
+	technicians []domain.UserReadOnly,
 ) (string, error) {
 	orgDir := filepath.Join(s.storageBasePath, invoice.OrganizationID.String())
 	if err := os.MkdirAll(orgDir, 0755); err != nil {
@@ -126,6 +126,13 @@ func (s *PDFService) GenerateInvoicePDF(
 	pdf.AddPage()
 	pdf.SetMargins(15, 15, 15)
 
+	// Page break helper to prevent custom grids from overflowing
+	checkPageBreak := func(spaceNeeded float64) {
+		if pdf.GetY()+spaceNeeded > 272.0 {
+			pdf.AddPage()
+		}
+	}
+
 	// 2. Background DRAFT Watermark if invoice status is Draft
 	if invoice.Status == domain.InvoiceStatusDraft {
 		pdf.SetFont("Arial", "B", 55)
@@ -212,7 +219,7 @@ func (s *PDFService) GenerateInvoicePDF(
 	// TAX INVOICE label – always top-right regardless of logo
 	pdf.SetXY(120, 15)
 	pdf.SetFont("Arial", "B", 20)
-	pdf.CellFormat(75, 6, "TAX INVOICE", "", 1, "R", false, 0, "")
+	pdf.CellFormat(75, 6, "INVOICE", "", 1, "R", false, 0, "")
 	
 	pdf.SetX(leftX)
 	pdf.SetFont("Arial", "", 8.5)
@@ -242,6 +249,12 @@ func (s *PDFService) GenerateInvoicePDF(
 	if compPhone != "" {
 		contactStr += "Phone: " + compPhone
 	}
+	if organization != nil && organization.Email != "" {
+		if contactStr != "" {
+			contactStr += " | "
+		}
+		contactStr += "Email: " + organization.Email
+	}
 	if compWebsite != "" {
 		if contactStr != "" {
 			contactStr += " | "
@@ -254,12 +267,18 @@ func (s *PDFService) GenerateInvoicePDF(
 	}
 
 	// 4. Zoho-Style 2-Column Metadata Box (Grid)
+	hasThirdRow := invoice.SalesOrder != "" || invoice.PurchaseOrder != "" || invoice.ReferenceNo != ""
+	boxHeight := 13.0
+	if hasThirdRow {
+		boxHeight = 18.0
+	}
+
 	pdf.SetFillColor(bgLightR, bgLightG, bgLightB)
 	pdf.SetDrawColor(lineR, lineG, lineB)
-	pdf.Rect(15, 45, 180, 25, "DF")
+	pdf.Rect(15, 45, 180, boxHeight, "DF")
 	
 	// Column 1
-	pdf.SetY(48)
+	pdf.SetY(47)
 	pdf.SetFont("Arial", "B", 9)
 	pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
 	pdf.SetX(20)
@@ -275,7 +294,7 @@ func (s *PDFService) GenerateInvoicePDF(
 	pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
 	pdf.SetFont("Arial", "", 9)
 	pdf.Cell(0, 5, ": " + invoice.InvoiceDate.Format("02/01/2006"))
-	pdf.Ln(6)
+	pdf.Ln(5)
 	
 	pdf.SetX(20)
 	pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
@@ -295,33 +314,35 @@ func (s *PDFService) GenerateInvoicePDF(
 	pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
 	pdf.SetFont("Arial", "", 9)
 	pdf.Cell(0, 5, ": " + invoice.DueDate.Format("02/01/2006"))
-	pdf.Ln(6)
 	
-	pdf.SetX(20)
-	if invoice.SalesOrder != "" || invoice.PurchaseOrder != "" {
-		pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-		pdf.SetFont("Arial", "B", 9)
-		label := "Sales Order"
-		value := invoice.SalesOrder
-		if value == "" {
-			label = "Purchase Order"
-			value = invoice.PurchaseOrder
+	if hasThirdRow {
+		pdf.Ln(5)
+		pdf.SetX(20)
+		if invoice.SalesOrder != "" || invoice.PurchaseOrder != "" {
+			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+			pdf.SetFont("Arial", "B", 9)
+			label := "Sales Order"
+			value := invoice.SalesOrder
+			if value == "" {
+				label = "Purchase Order"
+				value = invoice.PurchaseOrder
+			}
+			pdf.Cell(30, 5, label)
+			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+			pdf.SetFont("Arial", "", 9)
+			pdf.Cell(60, 5, ": " + value)
+		} else if invoice.ReferenceNo != "" {
+			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+			pdf.SetFont("Arial", "B", 9)
+			pdf.Cell(30, 5, "Reference No")
+			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+			pdf.SetFont("Arial", "", 9)
+			pdf.Cell(60, 5, ": " + invoice.ReferenceNo)
 		}
-		pdf.Cell(30, 5, label)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		pdf.SetFont("Arial", "", 9)
-		pdf.Cell(60, 5, ": " + value)
-	} else if invoice.ReferenceNo != "" {
-		pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-		pdf.SetFont("Arial", "B", 9)
-		pdf.Cell(30, 5, "Reference No")
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		pdf.SetFont("Arial", "", 9)
-		pdf.Cell(60, 5, ": " + invoice.ReferenceNo)
 	}
 	
 	// Reset Y position after the metadata box
-	pdf.SetY(75)
+	pdf.SetY(45 + boxHeight + 4.0)
 
 	// 5. Dynamic Address Block — show only the addresses that are present
 	type addressCol struct {
@@ -382,204 +403,230 @@ func (s *PDFService) GenerateInvoicePDF(
 		}
 	}
 
+	// 5. Combined Customer & Address Details Card
+	var nameLines, emailLines, phoneLines [][]byte
+	nameVal := "N/A"
+	emailVal := "N/A"
+	phoneVal := "N/A"
+	if customer != nil {
+		if customer.DisplayName != "" {
+			nameVal = customer.DisplayName
+		}
+		if customer.Email != "" {
+			emailVal = customer.Email
+		}
+		if customer.Phone != "" {
+			phoneVal = customer.Phone
+		}
+	}
+	
+	nameLines = pdf.SplitLines([]byte(nameVal), 54.0)
+	emailLines = pdf.SplitLines([]byte(emailVal), 54.0)
+	phoneLines = pdf.SplitLines([]byte(phoneVal), 54.0)
+	
+	maxCustLines := len(nameLines)
+	if len(emailLines) > maxCustLines {
+		maxCustLines = len(emailLines)
+	}
+	if len(phoneLines) > maxCustLines {
+		maxCustLines = len(phoneLines)
+	}
+	
+	custHeight := 4.5 + 1.0 + float64(maxCustLines)*4.0
+
+	var addrCardHeight float64 = 0.0
+	type addressColLayout struct {
+		label        string
+		addressLines [][]byte
+		height       float64
+	}
+	var layouts []addressColLayout
+	var colWidth float64 = 0.0
+	var textWidth float64 = 0.0
+
 	if len(addressCols) > 0 {
 		totalWidth := 180.0
-		colWidth := totalWidth / float64(len(addressCols))
+		colWidth = totalWidth / float64(len(addressCols))
+		textWidth = colWidth - 6.0 // 3mm padding on each side
 
-		// Header row
-		pdf.SetFont("Arial", "B", 9)
-		pdf.SetFillColor(primaryR, primaryG, primaryB)
-		pdf.SetTextColor(255, 255, 255)
+		layouts = make([]addressColLayout, len(addressCols))
+		maxColHeight := 0.0
+
 		for i, col := range addressCols {
-			align := "L"
-			ln := 0
-			if i == len(addressCols)-1 {
-				ln = 1
+			layout := addressColLayout{
+				label: col.label,
 			}
-			pdf.CellFormat(colWidth, 6, "  "+col.label, "1", ln, align, true, 0, "")
-		}
-
-		// Customer name row
-		addressY := pdf.GetY()
-		pdf.SetFont("Arial", "B", 9)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		for i, col := range addressCols {
-			ln := 0
-			if i == len(addressCols)-1 {
-				ln = 1
-			}
-			pdf.CellFormat(colWidth, 5, "  "+col.name, "", ln, "L", false, 0, "")
-		}
-
-		// Address body rows — render each column's multiline address and track max Y
-		bodyStartY := pdf.GetY()
-		colEndYs := make([]float64, len(addressCols))
-
-		pdf.SetFont("Arial", "", 8.5)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-
-		for i, col := range addressCols {
-			pdf.SetXY(15+float64(i)*colWidth, bodyStartY)
 			addrText := formatAddress(col.street, col.city, col.state, col.code, col.country)
+			layout.addressLines = pdf.SplitLines([]byte(addrText), textWidth)
 
-			// Determine left/right border alignment
-			borderStyle := ""
-			if i == 0 {
-				borderStyle = "L"
-			} else if i == len(addressCols)-1 {
-				borderStyle = "R"
-			}
-			pdf.MultiCell(colWidth, 4.5, addrText, borderStyle, "L", false)
-			colEndYs[i] = pdf.GetY()
-		}
-
-		// Find the max Y across all columns to ensure consistent bottom alignment
-		maxAddrY := bodyStartY
-		for _, y := range colEndYs {
-			if y > maxAddrY {
-				maxAddrY = y
+			// Calculate height for this column: Label (4.5) + Gap (2.0) + Address lines
+			h := 4.5 + 2.0 + float64(len(layout.addressLines))*4.0
+			layout.height = h
+			layouts[i] = layout
+			if h > maxColHeight {
+				maxColHeight = h
 			}
 		}
 
-		// Draw bottom border line across full address block width
-		pdf.SetDrawColor(lineR, lineG, lineB)
-		pdf.Line(15, maxAddrY, 195, maxAddrY)
+		addrCardHeight = maxColHeight
+	}
 
-		_ = addressY
-		pdf.SetY(maxAddrY + 6)
+	// Calculate total height of combined card
+	cardHeight := 4.0 + custHeight + 3.0 // Top padding + customer height + separator spacing
+	if len(addressCols) > 0 {
+		cardHeight += 3.0 + addrCardHeight // spacing + address height
+	}
+	cardHeight += 4.0 // Bottom padding
+
+	// Page break check for header and card
+	checkPageBreak(7.0 + cardHeight + 10.0)
+
+	// Section Header
+	pdf.SetFont("Arial", "B", 10)
+	pdf.SetTextColor(primaryR, primaryG, primaryB)
+	pdf.Cell(0, 6, "CUSTOMER DETAILS")
+	pdf.Ln(7)
+
+	cardStartY := pdf.GetY()
+
+	// Draw card container with light grey background and thin border
+	pdf.SetFillColor(bgLightR, bgLightG, bgLightB)
+	pdf.SetDrawColor(lineR, lineG, lineB)
+	pdf.SetLineWidth(0.2)
+	pdf.Rect(15, cardStartY, 180, cardHeight, "DF")
+
+	// 1. Render Customer Details (3 Columns)
+	colWidthCust := 180.0 / 3.0
+	
+	// Column 0: Customer Name
+	pdf.SetXY(18.0, cardStartY+4.0)
+	pdf.SetFont("Arial", "B", 7.5)
+	pdf.SetTextColor(primaryR, primaryG, primaryB)
+	pdf.Cell(colWidthCust-6.0, 4.5, "CUSTOMER NAME")
+	
+	pdf.SetFont("Arial", "B", 8.5)
+	pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+	currentY = cardStartY + 9.5
+	for _, line := range nameLines {
+		pdf.SetXY(18.0, currentY)
+		pdf.Cell(colWidthCust-6.0, 4.0, string(line))
+		currentY += 4.0
+	}
+
+	// Column 1: Email
+	pdf.SetXY(15.0+colWidthCust+3.0, cardStartY+4.0)
+	pdf.SetFont("Arial", "B", 7.5)
+	pdf.SetTextColor(primaryR, primaryG, primaryB)
+	pdf.Cell(colWidthCust-6.0, 4.5, "EMAIL")
+	
+	pdf.SetFont("Arial", "", 8.5)
+	pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+	currentY = cardStartY + 9.5
+	for _, line := range emailLines {
+		pdf.SetXY(15.0+colWidthCust+3.0, currentY)
+		pdf.Cell(colWidthCust-6.0, 4.0, string(line))
+		currentY += 4.0
+	}
+
+	// Column 2: Phone
+	pdf.SetXY(15.0+colWidthCust*2.0+3.0, cardStartY+4.0)
+	pdf.SetFont("Arial", "B", 7.5)
+	pdf.SetTextColor(primaryR, primaryG, primaryB)
+	pdf.Cell(colWidthCust-6.0, 4.5, "PHONE")
+	
+	pdf.SetFont("Arial", "", 8.5)
+	pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+	currentY = cardStartY + 9.5
+	for _, line := range phoneLines {
+		pdf.SetXY(15.0+colWidthCust*2.0+3.0, currentY)
+		pdf.Cell(colWidthCust-6.0, 4.0, string(line))
+		currentY += 4.0
+	}
+
+	// Draw vertical separators in Customer Details row
+	pdf.SetDrawColor(lineR, lineG, lineB)
+	pdf.SetLineWidth(0.15)
+	pdf.Line(15.0+colWidthCust, cardStartY+4.0, 15.0+colWidthCust, cardStartY+4.0+custHeight)
+	pdf.Line(15.0+colWidthCust*2.0, cardStartY+4.0, 15.0+colWidthCust*2.0, cardStartY+4.0+custHeight)
+
+	// 2. Draw horizontal separator line between customer details and address details
+	sepY := cardStartY + 4.0 + custHeight + 2.0
+	pdf.SetDrawColor(lineR, lineG, lineB)
+	pdf.SetLineWidth(0.15)
+	pdf.Line(18.0, sepY, 192.0, sepY)
+
+	// 3. Render Address Details (side-by-side columns)
+	if len(addressCols) > 0 {
+		addrStartY := sepY + 3.0
+
+		// Draw vertical separators in Address row
+		if len(addressCols) > 1 {
+			pdf.SetDrawColor(lineR, lineG, lineB)
+			pdf.SetLineWidth(0.15)
+			for i := 1; i < len(addressCols); i++ {
+				sepX := 15.0 + float64(i)*colWidth
+				pdf.Line(sepX, addrStartY, sepX, addrStartY+addrCardHeight)
+			}
+		}
+
+		for i, col := range addressCols {
+			colStartX := 15.0 + float64(i)*colWidth + 3.0
+			currentY = addrStartY
+
+			// Print Label
+			pdf.SetXY(colStartX, currentY)
+			pdf.SetFont("Arial", "B", 7.5)
+			pdf.SetTextColor(primaryR, primaryG, primaryB)
+			pdf.Cell(textWidth, 4.5, col.label)
+			currentY += 4.5
+			currentY += 2.0 // Gap below label before address
+
+			// Print Address lines
+			pdf.SetFont("Arial", "", 8.5)
+			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+			for _, line := range layouts[i].addressLines {
+				pdf.SetXY(colStartX, currentY)
+				pdf.Cell(textWidth, 4, string(line))
+				currentY += 4
+			}
+		}
+
+		pdf.SetY(addrStartY + addrCardHeight + 6.0)
 	} else {
 		pdf.SetY(pdf.GetY() + 4)
 	}
 
-	// Page break helper to prevent custom grids from overflowing
-	checkPageBreak := func(spaceNeeded float64) {
-		if pdf.GetY()+spaceNeeded > 272.0 {
-			pdf.AddPage()
-		}
-	}
+	// 1. Service Details Section (merged Work Order and Appointment details)
+	if workOrder != nil || len(appointments) > 0 {
+		// Calculate the total height of the single unified card
+		var totalCardHeight float64 = 0.0
+		var workOrderHeight float64 = 0.0
+		var summaryLines [][]byte
+		var summaryHeight float64 = 0.0
 
-	// 1. Work Order Details Section
-	if workOrder != nil {
-		summaryLines := pdf.SplitLines([]byte(workOrder.Summary), 170.0)
-		lineHeight := 4.0
-		summaryHeight := float64(len(summaryLines)) * lineHeight
-		cardHeight := 28.0 + summaryHeight
-
-		checkPageBreak(cardHeight + 10.0)
-		startY := pdf.GetY()
-
-		// Section Header
-		pdf.SetFont("Arial", "B", 10)
-		pdf.SetTextColor(primaryR, primaryG, primaryB)
-		pdf.Cell(0, 6, "1. WORK ORDER DETAILS")
-		pdf.Ln(7)
-		
-		startY = pdf.GetY()
-
-		// Borderless card with light grey background
-		pdf.SetFillColor(bgLightR, bgLightG, bgLightB)
-		pdf.SetDrawColor(lineR, lineG, lineB)
-		pdf.SetLineWidth(0.2)
-		pdf.Rect(15, startY, 180, cardHeight, "DF")
-
-		// Left accent bar
-		pdf.SetFillColor(primaryR, primaryG, primaryB)
-		pdf.Rect(15, startY, 1.5, cardHeight, "F")
-
-		// Row 1
-		pdf.SetXY(18, startY+3.0)
-		pdf.SetFont("Arial", "B", 8)
-		pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-		pdf.Cell(30, 5, "Work Order ID")
-		pdf.SetFont("Arial", "", 8.5)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		pdf.Cell(60, 5, ": "+workOrder.ID.String())
-
-		pdf.SetFont("Arial", "B", 8)
-		pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-		pdf.Cell(30, 5, "Job Type")
-		pdf.SetFont("Arial", "", 8.5)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		woType := "Standard"
-		if workOrder.Type != "" {
-			woType = workOrder.Type
-		}
-		pdf.Cell(0, 5, ": "+woType)
-
-		// Row 2
-		pdf.SetXY(18, startY+9.0)
-		pdf.SetFont("Arial", "B", 8)
-		pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-		pdf.Cell(30, 5, "Priority")
-		pdf.SetFont("Arial", "", 8.5)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		woPriority := "Normal"
-		if workOrder.Priority != "" {
-			woPriority = workOrder.Priority
-		}
-		pdf.Cell(60, 5, ": "+woPriority)
-
-		pdf.SetFont("Arial", "B", 8)
-		pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-		pdf.Cell(30, 5, "Status")
-		pdf.SetFont("Arial", "", 8.5)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		pdf.Cell(0, 5, ": "+workOrder.Status)
-
-		// Row 3
-		pdf.SetXY(18, startY+15.0)
-		pdf.SetFont("Arial", "B", 8)
-		pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-		pdf.Cell(30, 5, "Due Date")
-		pdf.SetFont("Arial", "", 8.5)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		dueDateStr := "N/A"
-		if workOrder.DueDate != nil {
-			dueDateStr = workOrder.DueDate.Format("02/01/2006")
-		}
-		pdf.Cell(60, 5, ": "+dueDateStr)
-
-		pdf.SetFont("Arial", "B", 8)
-		pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-		pdf.Cell(30, 5, "Created At")
-		pdf.SetFont("Arial", "", 8.5)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		pdf.Cell(0, 5, ": "+workOrder.CreatedAt.Format("02/01/2006"))
-
-		// Row 4: Summary / Description
-		pdf.SetXY(18, startY+21.0)
-		pdf.SetFont("Arial", "B", 8)
-		pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-		pdf.Cell(30, 5, "Description")
-		pdf.SetFont("Arial", "", 8.5)
-		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		pdf.SetXY(18, startY+25.0)
-		
-		for _, line := range summaryLines {
-			pdf.SetX(18)
-			pdf.Cell(170, lineHeight, string(line))
-			pdf.Ln(lineHeight)
+		if workOrder != nil {
+			summaryLines = pdf.SplitLines([]byte(workOrder.Summary), 170.0)
+			summaryHeight = float64(len(summaryLines)) * 4.0
+			workOrderHeight = 28.0 + summaryHeight // Inner header (6) + fields (12) + description (10)
+			totalCardHeight += workOrderHeight
 		}
 
-		pdf.SetY(startY + cardHeight + 6.0)
-	}
-
-	// 2. Service Appointment Details Section
-	if len(appointments) > 0 {
-		checkPageBreak(15.0)
-		
-		pdf.SetFont("Arial", "B", 10)
-		pdf.SetTextColor(primaryR, primaryG, primaryB)
-		pdf.Cell(0, 6, "2. SERVICE APPOINTMENT DETAILS")
-		pdf.Ln(7)
+		type apptLayout struct {
+			appt        domain.ServiceAppointmentRM
+			techList    []domain.UserReadOnly
+			notesLines  [][]byte
+			notesHeight float64
+			techsHeight float64
+			apptHeight  float64
+		}
+		var apptLayouts []apptLayout
 
 		for _, appt := range appointments {
-			techsStr := "N/A"
-			if len(appt.TechnicianNames) > 0 {
-				techsStr = strings.Join(appt.TechnicianNames, ", ")
-			} else if len(technicians) > 0 {
-				// fallback to combined technicians list
-				techsStr = strings.Join(technicians, ", ")
+			var techList []domain.UserReadOnly
+			if len(appt.Technicians) > 0 {
+				techList = appt.Technicians
+			} else {
+				techList = technicians
 			}
 
 			var notesLines [][]byte
@@ -589,77 +636,186 @@ func (s *PDFService) GenerateInvoicePDF(
 				notesHeight = float64(len(notesLines))*4.0 + 4.0
 			}
 
-			cardHeight := 28.0 + notesHeight
-			checkPageBreak(cardHeight + 6.0)
-			startY := pdf.GetY()
+			techsHeight := 5.0
+			if len(techList) > 0 {
+				techsHeight = 10.0 + float64(len(techList))*12.0
+			}
 
-			// Borderless card with light grey background
-			pdf.SetFillColor(bgLightR, bgLightG, bgLightB)
-			pdf.SetDrawColor(lineR, lineG, lineB)
-			pdf.SetLineWidth(0.2)
-			pdf.Rect(15, startY, 180, cardHeight, "DF")
+			apptHeight := 28.0 + notesHeight + techsHeight
+			apptLayouts = append(apptLayouts, apptLayout{
+				appt:        appt,
+				techList:    techList,
+				notesLines:  notesLines,
+				notesHeight: notesHeight,
+				techsHeight: techsHeight,
+				apptHeight:  apptHeight,
+			})
+		}
 
-			// Left accent bar
-			pdf.SetFillColor(primaryR, primaryG, primaryB)
-			pdf.Rect(15, startY, 1.5, cardHeight, "F")
+		if len(apptLayouts) > 0 {
+			if totalCardHeight > 0 {
+				totalCardHeight += 5.0 // spacer between work order and appointments
+			}
+			for _, al := range apptLayouts {
+				totalCardHeight += al.apptHeight
+			}
+			if len(apptLayouts) > 1 {
+				totalCardHeight += float64(len(apptLayouts)-1) * 5.0
+			}
+		}
+
+		checkPageBreak(totalCardHeight + 15.0)
+
+		// Section Header
+		pdf.SetFont("Arial", "B", 10)
+		pdf.SetTextColor(primaryR, primaryG, primaryB)
+		pdf.Cell(0, 6, "SERVICE DETAILS")
+		pdf.Ln(7)
+
+		cardStartY := pdf.GetY()
+
+		// Borderless card with light grey background covering the entire service details
+		pdf.SetFillColor(bgLightR, bgLightG, bgLightB)
+		pdf.SetDrawColor(lineR, lineG, lineB)
+		pdf.SetLineWidth(0.2)
+		pdf.Rect(15, cardStartY, 180, totalCardHeight, "DF")
+
+		currentY := cardStartY
+
+		// Render Work Order Details Card Section
+		if workOrder != nil {
+			// Inner Header line inside card
+			pdf.SetXY(18, currentY+3.0)
+			pdf.SetFont("Arial", "B", 9)
+			pdf.SetTextColor(primaryR, primaryG, primaryB)
+			pdf.Cell(0, 5, "Work Order Details")
+
+			// Row 1
+			pdf.SetXY(18, currentY+9.0)
+			pdf.SetFont("Arial", "B", 8)
+			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+			pdf.Cell(35, 5, "Work Order ID")
+			pdf.SetFont("Arial", "", 8.5)
+			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+			pdf.Cell(59, 5, ": "+workOrder.ID.String())
+
+			pdf.SetFont("Arial", "B", 8)
+			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+			pdf.Cell(25, 5, "Job Type")
+			pdf.SetFont("Arial", "", 8.5)
+			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+			woType := "Standard"
+			if workOrder.Type != "" {
+				woType = workOrder.Type
+			}
+			pdf.Cell(0, 5, ": "+woType)
+
+			// Row 2
+			pdf.SetXY(18, currentY+15.0)
+			pdf.SetFont("Arial", "B", 8)
+			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+			pdf.Cell(35, 5, "Due Date")
+			pdf.SetFont("Arial", "", 8.5)
+			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+			dueDateStr := "N/A"
+			if workOrder.DueDate != nil {
+				dueDateStr = workOrder.DueDate.Format("02/01/2006")
+			}
+			pdf.Cell(59, 5, ": "+dueDateStr)
+
+			pdf.SetFont("Arial", "B", 8)
+			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+			pdf.Cell(25, 5, "Created At")
+			pdf.SetFont("Arial", "", 8.5)
+			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+			pdf.Cell(0, 5, ": "+workOrder.CreatedAt.Format("02/01/2006"))
+
+			// Row 3: Summary / Description
+			pdf.SetXY(18, currentY+21.0)
+			pdf.SetFont("Arial", "B", 8)
+			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+			pdf.Cell(30, 5, "Description")
+			pdf.SetFont("Arial", "", 8.5)
+			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+			pdf.SetXY(18, currentY+25.0)
+			
+			lineHeight := 4.0
+			for _, line := range summaryLines {
+				pdf.SetX(18)
+				pdf.Cell(170, lineHeight, string(line))
+				pdf.Ln(lineHeight)
+			}
+
+			currentY += workOrderHeight
+		}
+
+		// Render Service Appointment Card Sections
+		for _, al := range apptLayouts {
+			if currentY > cardStartY {
+				// Draw separator line between Work Order and Appointments or between consecutive Appointments
+				pdf.SetDrawColor(lineR, lineG, lineB)
+				pdf.SetLineWidth(0.15)
+				pdf.Line(18, currentY+2.0, 192, currentY+2.0)
+				currentY += 5.0
+			}
 
 			// Header line inside card
-			pdf.SetXY(18, startY+3.0)
+			pdf.SetXY(18, currentY+3.0)
 			pdf.SetFont("Arial", "B", 9)
 			pdf.SetTextColor(primaryR, primaryG, primaryB)
 			pdf.Cell(0, 5, "Service Appointment Details")
 
 			// Row 1
-			pdf.SetXY(18, startY+9.0)
+			pdf.SetXY(18, currentY+9.0)
 			pdf.SetFont("Arial", "B", 8)
 			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-			pdf.Cell(30, 5, "Appointment Number")
+			pdf.Cell(35, 5, "Appointment Number")
 			pdf.SetFont("Arial", "", 8.5)
 			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-			pdf.Cell(60, 5, ": "+appt.AppointmentNumber)
+			pdf.Cell(59, 5, ": "+al.appt.AppointmentNumber)
 
 			pdf.SetFont("Arial", "B", 8)
 			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-			pdf.Cell(30, 5, "Status")
+			pdf.Cell(25, 5, "Status")
 			pdf.SetFont("Arial", "", 8.5)
 			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-			pdf.Cell(0, 5, ": "+appt.Status)
+			pdf.Cell(0, 5, ": "+al.appt.Status)
 
 			// Row 2: Actual Start and Actual End
-			pdf.SetXY(18, startY+15.0)
+			pdf.SetXY(18, currentY+15.0)
 			pdf.SetFont("Arial", "B", 8)
 			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-			pdf.Cell(30, 5, "Actual Start")
+			pdf.Cell(35, 5, "Actual Start")
 			pdf.SetFont("Arial", "", 8.5)
 			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
 			actStartStr := "N/A"
-			if appt.ActualStartTime != nil {
-				actStartStr = appt.ActualStartTime.Format("02/01/2006 15:04")
+			if al.appt.ActualStartTime != nil {
+				actStartStr = al.appt.ActualStartTime.Format("02/01/2006 15:04")
 			}
-			pdf.Cell(60, 5, ": "+actStartStr)
+			pdf.Cell(59, 5, ": "+actStartStr)
 
 			pdf.SetFont("Arial", "B", 8)
 			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-			pdf.Cell(30, 5, "Actual End")
+			pdf.Cell(25, 5, "Actual End")
 			pdf.SetFont("Arial", "", 8.5)
 			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
 			actEndStr := "N/A"
-			if appt.ActualEndTime != nil {
-				actEndStr = appt.ActualEndTime.Format("02/01/2006 15:04")
+			if al.appt.ActualEndTime != nil {
+				actEndStr = al.appt.ActualEndTime.Format("02/01/2006 15:04")
 			}
 			pdf.Cell(0, 5, ": "+actEndStr)
 
-			// Row 3: Total Time Worked and Technicians
-			pdf.SetXY(18, startY+21.0)
+			// Row 3: Total Time Worked
+			pdf.SetXY(18, currentY+21.0)
 			pdf.SetFont("Arial", "B", 8)
 			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-			pdf.Cell(30, 5, "Total Time Worked")
+			pdf.Cell(35, 5, "Total Time Worked")
 			pdf.SetFont("Arial", "", 8.5)
 			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
 			
 			durationStr := "N/A"
-			if appt.ActualStartTime != nil && appt.ActualEndTime != nil {
-				diff := appt.ActualEndTime.Sub(*appt.ActualStartTime)
+			if al.appt.ActualStartTime != nil && al.appt.ActualEndTime != nil {
+				diff := al.appt.ActualEndTime.Sub(*al.appt.ActualStartTime)
 				hours := int(diff.Hours())
 				minutes := int(diff.Minutes()) % 60
 				if hours > 0 {
@@ -668,34 +824,97 @@ func (s *PDFService) GenerateInvoicePDF(
 					durationStr = fmt.Sprintf("%d mins", minutes)
 				}
 			}
-			pdf.Cell(60, 5, ": "+durationStr)
-
-			pdf.SetFont("Arial", "B", 8)
-			pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
-			pdf.Cell(30, 5, "Technicians")
-			pdf.SetFont("Arial", "", 8.5)
-			pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-			pdf.Cell(0, 5, ": "+techsStr)
+			pdf.Cell(0, 5, ": "+durationStr)
 
 			// Row 4: Notes
-			if appt.Notes != "" {
-				pdf.SetXY(18, startY+27.0)
+			if al.appt.Notes != "" {
+				pdf.SetXY(18, currentY+27.0)
 				pdf.SetFont("Arial", "B", 8)
 				pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
 				pdf.Cell(30, 4, "Appointment Notes")
 				pdf.SetFont("Arial", "", 8.5)
 				pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-				pdf.SetXY(18, startY+30.0)
+				pdf.SetXY(18, currentY+30.0)
 				
-				for _, line := range notesLines {
+				for _, line := range al.notesLines {
 					pdf.SetX(18)
 					pdf.Cell(170, 4.0, string(line))
 					pdf.Ln(4.0)
 				}
 			}
 
-			pdf.SetY(startY + cardHeight + 5.0)
+			// Row 5: Detailed Technicians section
+			techStartY := currentY + 27.0
+			if al.appt.Notes != "" {
+				techStartY += al.notesHeight
+			}
+
+			// Draw separator line inside the card
+			pdf.SetDrawColor(lineR, lineG, lineB)
+			pdf.SetLineWidth(0.1)
+			pdf.Line(18, techStartY, 192, techStartY)
+
+			pdf.SetXY(18, techStartY+2.0)
+			pdf.SetFont("Arial", "B", 7.5)
+			pdf.SetTextColor(primaryR, primaryG, primaryB)
+			pdf.Cell(0, 5, "ASSIGNED TECHNICIANS")
+
+			techY := techStartY + 8.0
+			if len(al.techList) == 0 {
+				pdf.SetXY(18, techY)
+				pdf.SetFont("Arial", "I", 8.5)
+				pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+				pdf.Cell(0, 5, "No technicians assigned")
+			} else {
+				for _, tech := range al.techList {
+					// Row 1 of technician: Name & Employee ID
+					pdf.SetXY(18, techY)
+					pdf.SetFont("Arial", "B", 8)
+					pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+					pdf.Cell(35, 5, "Technician Name")
+					pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+					pdf.SetFont("Arial", "", 8.5)
+					pdf.Cell(59, 5, ": "+tech.FullName)
+
+					pdf.SetFont("Arial", "B", 8)
+					pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+					pdf.Cell(25, 5, "Employee ID")
+					pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+					pdf.SetFont("Arial", "", 8.5)
+					empID := "N/A"
+					if tech.EmployeeID != nil && *tech.EmployeeID != "" {
+						empID = *tech.EmployeeID
+					}
+					pdf.Cell(0, 5, ": "+empID)
+
+					// Row 2 of technician: Phone & Email
+					pdf.SetXY(18, techY+6.0)
+					pdf.SetFont("Arial", "B", 8)
+					pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+					pdf.Cell(35, 5, "Mobile")
+					pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+					pdf.SetFont("Arial", "", 8.5)
+					mobile := "N/A"
+					if tech.PhoneNumber != nil && *tech.PhoneNumber != "" {
+						mobile = *tech.PhoneNumber
+					}
+					pdf.Cell(59, 5, ": "+mobile)
+
+					pdf.SetFont("Arial", "B", 8)
+					pdf.SetTextColor(textMutedR, textMutedG, textMutedB)
+					pdf.Cell(25, 5, "Email")
+					pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
+					pdf.SetFont("Arial", "", 8.5)
+					pdf.Cell(0, 5, ": "+tech.Email)
+
+					techY += 12.0
+				}
+			}
+
+			currentY += al.apptHeight
 		}
+
+		pdf.SetY(cardStartY + totalCardHeight + 5.0)
 		pdf.Ln(2)
 	}
 
@@ -711,13 +930,13 @@ func (s *PDFService) GenerateInvoicePDF(
 		}
 	}
 
-	// 3. Services Provided Section
+	// 2. Services Provided Section
 	if len(services) > 0 {
 		checkPageBreak(25.0)
 
 		pdf.SetFont("Arial", "B", 10)
 		pdf.SetTextColor(primaryR, primaryG, primaryB)
-		pdf.Cell(0, 6, "3. SERVICES PROVIDED")
+		pdf.Cell(0, 6, "SERVICES PROVIDED")
 		pdf.Ln(7)
 
 		// Table Header
@@ -801,13 +1020,13 @@ func (s *PDFService) GenerateInvoicePDF(
 		pdf.Ln(6)
 	}
 
-	// 4. Parts Used Section
+	// 3. Parts Used Section
 	if len(parts) > 0 {
 		checkPageBreak(25.0)
 
 		pdf.SetFont("Arial", "B", 10)
 		pdf.SetTextColor(primaryR, primaryG, primaryB)
-		pdf.Cell(0, 6, "4. PARTS USED")
+		pdf.Cell(0, 6, "PARTS USED")
 		pdf.Ln(7)
 
 		// Table Header
@@ -897,7 +1116,7 @@ func (s *PDFService) GenerateInvoicePDF(
 	pdf.SetFont("Arial", "", 9)
 	pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
 	
-	labelX := 110.0
+	labelX := 125.0
 	valWidth := 70.0
 	rowH := 5.5
 	
@@ -965,8 +1184,9 @@ func (s *PDFService) GenerateInvoicePDF(
 	pdf.SetFont("Arial", "", 8.5)
 
 	// 6. Notes & Signature Sections
-	if invoice.Notes != "" {
-		notesLines := pdf.SplitLines([]byte(invoice.Notes), 180.0)
+	trimmedNotes := strings.TrimSpace(invoice.Notes)
+	if trimmedNotes != "" && trimmedNotes != "<nil>" {
+		notesLines := pdf.SplitLines([]byte(trimmedNotes), 180.0)
 		notesH := float64(len(notesLines))*4.0 + 10.0
 		checkPageBreak(notesH)
 		pdf.SetY(pdf.GetY() + 6)
@@ -976,11 +1196,12 @@ func (s *PDFService) GenerateInvoicePDF(
 		pdf.Ln(5)
 		pdf.SetFont("Arial", "", 8)
 		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		pdf.MultiCell(180, 4, invoice.Notes, "", "L", false)
+		pdf.MultiCell(180, 4, trimmedNotes, "", "L", false)
 	}
 
-	if invoice.Terms != "" {
-		termsLines := pdf.SplitLines([]byte(invoice.Terms), 180.0)
+	trimmedTerms := strings.TrimSpace(invoice.Terms)
+	if trimmedTerms != "" && trimmedTerms != "<nil>" {
+		termsLines := pdf.SplitLines([]byte(trimmedTerms), 180.0)
 		termsH := float64(len(termsLines))*4.0 + 10.0
 		checkPageBreak(termsH)
 		pdf.SetY(pdf.GetY() + 6)
@@ -990,15 +1211,15 @@ func (s *PDFService) GenerateInvoicePDF(
 		pdf.Ln(5)
 		pdf.SetFont("Arial", "", 8)
 		pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-		pdf.MultiCell(180, 4, invoice.Terms, "", "L", false)
+		pdf.MultiCell(180, 4, trimmedTerms, "", "L", false)
 	}
 
 	checkPageBreak(25.0)
 	pdf.SetY(-35)
-	pdf.SetX(130)
+	pdf.SetX(125)
 	pdf.SetFont("Arial", "B", 9)
-	pdf.SetTextColor(textDarkR, textDarkG, textDarkB)
-	pdf.CellFormat(65, 5, "Authorized Signature", "T", 1, "C", false, 0, "")
+	pdf.SetTextColor(primaryR, primaryG, primaryB)
+	pdf.CellFormat(70, 5, "Authorized Signature", "T", 1, "C", false, 0, "")
 
 	if err := pdf.OutputFileAndClose(pdfPath); err != nil {
 		return "", fmt.Errorf("failed to save PDF file: %w", err)
@@ -1027,61 +1248,58 @@ func formatAddress(street, city, state, code, country string) string {
 	code = strings.TrimSpace(code)
 	country = strings.TrimSpace(country)
 
-	if street == "" {
-		parts := make([]string, 0)
-		if city != "" {
-			parts = append(parts, city)
+	// Replace all newlines in street with commas to make it continuous
+	street = strings.ReplaceAll(street, "\n", ", ")
+	
+	// Split by commas, trim, and build a unique slice of parts
+	rawParts := strings.Split(street, ",")
+	var uniqueParts []string
+	seen := make(map[string]bool)
+
+	addPart := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
 		}
-		if state != "" {
-			parts = append(parts, state)
+		lower := strings.ToLower(p)
+		if !seen[lower] {
+			seen[lower] = true
+			uniqueParts = append(uniqueParts, p)
 		}
-		if code != "" {
-			parts = append(parts, code)
-		}
-		
-		addr := ""
-		if len(parts) > 0 {
-			addr = "  " + strings.Join(parts, ", ")
-		}
-		if country != "" {
-			if addr != "" {
-				addr += "\n"
-			}
-			addr += "  " + country
-		}
-		return addr
 	}
 
-	streetLines := strings.Split(street, "\n")
-	formattedStreetLines := make([]string, 0, len(streetLines))
-	for _, line := range streetLines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			formattedStreetLines = append(formattedStreetLines, "  " + trimmed)
+	for _, p := range rawParts {
+		addPart(p)
+	}
+
+	// Add city and state if not already in the street
+	addPart(city)
+	addPart(state)
+	
+	// Append ZIP code directly to state if the state is the last item
+	if code != "" && !seen[strings.ToLower(code)] {
+		if len(uniqueParts) > 0 && strings.ToLower(uniqueParts[len(uniqueParts)-1]) == strings.ToLower(state) {
+			uniqueParts[len(uniqueParts)-1] = uniqueParts[len(uniqueParts)-1] + " " + code
+			seen[strings.ToLower(code)] = true
+		} else {
+			addPart(code)
 		}
 	}
-	addr := strings.Join(formattedStreetLines, "\n")
 	
-	extraParts := make([]string, 0)
-	if city != "" && !strings.Contains(strings.ToLower(street), strings.ToLower(city)) {
-		extraParts = append(extraParts, city)
-	}
-	if state != "" && !strings.Contains(strings.ToLower(street), strings.ToLower(state)) {
-		extraParts = append(extraParts, state)
-	}
-	if code != "" && !strings.Contains(strings.ToLower(street), strings.ToLower(code)) {
-		extraParts = append(extraParts, code)
-	}
+	addPart(country)
+
+	// Join all parts with ", " to form a single continuous string
+	addrLine := strings.Join(uniqueParts, ", ")
 	
-	if len(extraParts) > 0 {
-		addr += "\n  " + strings.Join(extraParts, ", ")
+	// Return the address line without padding prefix for PDF layout
+	return addrLine
+}
+
+func containsIgnoreCase(s, substr string) bool {
+	if substr == "" {
+		return false
 	}
-	
-	if country != "" && !strings.Contains(strings.ToLower(street), strings.ToLower(country)) {
-		addr += "\n  " + country
-	}
-	
-	return addr
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 // downloadLogoToTemp fetches an image URL (resolving relative paths if needed)

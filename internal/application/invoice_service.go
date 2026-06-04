@@ -1088,10 +1088,10 @@ func (s *InvoiceService) GetAuditLogs(ctx context.Context, invoiceID uuid.UUID) 
 	return responses, nil
 }
 
-func (s *InvoiceService) getFSMDetails(ctx context.Context, invoice *domain.Invoice) (*domain.WorkOrderRM, []domain.ServiceAppointmentRM, []string) {
+func (s *InvoiceService) getFSMDetails(ctx context.Context, invoice *domain.Invoice) (*domain.WorkOrderRM, []domain.ServiceAppointmentRM, []domain.UserReadOnly) {
 	var workOrder *domain.WorkOrderRM
 	var appointments []domain.ServiceAppointmentRM
-	var technicians []string
+	var technicians []domain.UserReadOnly
 
 	if invoice.SourceSystem == domain.SourceSystemFSM && invoice.SourceReferenceID != nil {
 		if woID, err := uuid.Parse(*invoice.SourceReferenceID); err == nil {
@@ -1127,18 +1127,21 @@ func (s *InvoiceService) getFSMDetails(ctx context.Context, invoice *domain.Invo
 						appt.ActualEndTime = &localActEnd
 					}
 
-					if names, err := s.rmRepo.GetTechnicianNamesForAppointment(ctx, appt.ID); err == nil {
-						appt.TechnicianNames = names
-						for _, name := range names {
+					if techs, err := s.rmRepo.GetTechniciansForAppointment(ctx, appt.ID); err == nil {
+						appt.Technicians = techs
+						for _, tech := range techs {
+							// Keep appt.TechnicianNames populated for compatibility
+							appt.TechnicianNames = append(appt.TechnicianNames, tech.FullName)
+							
 							exists := false
 							for _, ext := range technicians {
-								if ext == name {
+								if ext.ID == tech.ID {
 									exists = true
 									break
 								}
 							}
 							if !exists {
-								technicians = append(technicians, name)
+								technicians = append(technicians, tech)
 							}
 						}
 					}

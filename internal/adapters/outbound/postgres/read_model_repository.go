@@ -166,22 +166,23 @@ func (r *ReadModelRepository) GetOrganization(ctx context.Context, id uuid.UUID)
 	if err != nil {
 		return nil, err
 	}
-	// Populate IconURL from the admin/owner user's profile photo
+	// Populate IconURL and Email from the admin/owner user
 	var adminUser domain.UserReadOnly
 	err = r.db.WithContext(ctx).
-		Where("organization_id = ? AND LOWER(role) IN ? AND profile_photo_url != ''", id.String(), []string{"admin", "owner"}).
+		Where("organization_id = ? AND LOWER(role) IN ?", id.String(), []string{"admin", "owner"}).
 		Order("created_at ASC").
 		First(&adminUser).Error
 	if err != nil {
-		// Try any user with a profile photo
+		// Try any user of the organization
 		r.db.WithContext(ctx).
-			Where("organization_id = ? AND profile_photo_url != ''", id.String()).
+			Where("organization_id = ?", id.String()).
 			Order("created_at ASC").
 			First(&adminUser)
 	}
 	if adminUser.ProfilePhotoURL != "" {
 		rm.IconURL = adminUser.ProfilePhotoURL
 	}
+	rm.Email = adminUser.Email
 	return &rm, nil
 }
 
@@ -290,4 +291,45 @@ func (r *ReadModelRepository) GetTechnicianNamesForAppointment(ctx context.Conte
 	
 	return names, nil
 }
+
+func (r *ReadModelRepository) GetTechniciansForAppointment(ctx context.Context, appointmentID uuid.UUID) ([]domain.UserReadOnly, error) {
+	var technicians []domain.UserReadOnly
+	
+	// Query resources associated with the appointment
+	err := r.db.WithContext(ctx).
+		Table("users_readonly").
+		Select("users_readonly.*").
+		Joins("JOIN service_appointment_resources_readonly ON service_appointment_resources_readonly.resource_id::text = users_readonly.workforce_user_id::text OR service_appointment_resources_readonly.resource_id::text = users_readonly.id::text").
+		Where("service_appointment_resources_readonly.service_appointment_id = ?", appointmentID).
+		Where("service_appointment_resources_readonly.deleted_at IS NULL").
+		Scan(&technicians).Error
+	if err != nil {
+		return nil, err
+	}
+	
+	// Query direct technician if any
+	var directTech domain.UserReadOnly
+	err = r.db.WithContext(ctx).
+		Table("users_readonly").
+		Select("users_readonly.*").
+		Joins("JOIN service_appointments_readonly ON service_appointments_readonly.assigned_technician_id::text = users_readonly.workforce_user_id::text OR service_appointments_readonly.assigned_technician_id::text = users_readonly.id::text").
+		Where("service_appointments_readonly.id = ?", appointmentID).
+		Where("service_appointments_readonly.deleted_at IS NULL").
+		First(&directTech).Error
+	if err == nil && directTech.ID != "" {
+		exists := false
+		for _, tech := range technicians {
+			if tech.ID == directTech.ID {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			technicians = append(technicians, directTech)
+		}
+	}
+	
+	return technicians, nil
+}
+
 

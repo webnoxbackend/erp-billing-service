@@ -262,6 +262,7 @@ type OrganizationRM struct {
 
 	// Virtual field — populated at query time from the admin user's profile photo
 	IconURL string `gorm:"-" json:"icon_url,omitempty"`
+	Email   string `gorm:"-" json:"email,omitempty"`
 }
 
 func (OrganizationRM) TableName() string {
@@ -351,6 +352,7 @@ type ServiceAppointmentRM struct {
 
 	Resources            []ServiceAppointmentResourceRM `gorm:"foreignKey:ServiceAppointmentID" json:"resources,omitempty"`
 	TechnicianNames      []string                       `gorm:"-" json:"technician_names,omitempty"`
+	Technicians          []UserReadOnly                 `gorm:"-" json:"technicians,omitempty"`
 }
 
 func (ServiceAppointmentRM) TableName() string {
