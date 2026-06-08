@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"erp-billing-service/internal/application/dto"
@@ -696,6 +697,9 @@ func (s *InvoiceService) SendInvoice(ctx context.Context, id uuid.UUID, req dto.
 	// 8. Publish InvoiceSent event
 	s.publishInvoiceSent(invoice)
 
+	// 9. Send notification email to customer
+	s.sendInvoiceNotification(ctx, invoice, customer, org)
+
 	return s.mapToResponse(ctx, invoice), nil
 }
 
@@ -1150,4 +1154,96 @@ func (s *InvoiceService) getFSMDetails(ctx context.Context, invoice *domain.Invo
 		}
 	}
 	return workOrder, appointments, technicians
+}
+
+func (s *InvoiceService) sendInvoiceNotification(ctx context.Context, invoice *domain.Invoice, customer *domain.CustomerRM, org *domain.OrganizationRM) {
+	// Find recipient email
+	var recipientEmail string
+	if invoice.ContactID != nil {
+		if contact, err := s.rmRepo.GetContact(ctx, *invoice.ContactID); err == nil && contact != nil && contact.Email != "" {
+			recipientEmail = contact.Email
+		}
+	}
+	if recipientEmail == "" && customer != nil && customer.Email != "" {
+		recipientEmail = customer.Email
+	}
+	if recipientEmail == "" && customer != nil {
+		if contact, err := s.rmRepo.GetPrimaryContact(ctx, customer.ID); err == nil && contact != nil && contact.Email != "" {
+			recipientEmail = contact.Email
+		}
+	}
+
+	if recipientEmail == "" {
+		fmt.Printf("[WARNING] No email recipient found for invoice %s notification\n", invoice.ID)
+		return
+	}
+
+	// Read PDF attachment
+	var attachments []shared_events.Attachment
+	if invoice.PDFPath != nil && *invoice.PDFPath != "" {
+		// Read file contents
+		pdfBytes, err := os.ReadFile(*invoice.PDFPath)
+		if err != nil {
+			fmt.Printf("[ERROR] Failed to read invoice PDF file for attachment: %v\n", err)
+		} else {
+			invNum := ""
+			if invoice.InvoiceNumber != nil {
+				invNum = *invoice.InvoiceNumber
+			} else {
+				invNum = invoice.ID.String()[:8]
+			}
+			attachments = append(attachments, shared_events.Attachment{
+				Name:        fmt.Sprintf("Invoice-%s.pdf", invNum),
+				Content:     pdfBytes,
+				ContentType: "application/pdf",
+			})
+		}
+	}
+
+	invNum := ""
+	if invoice.InvoiceNumber != nil {
+		invNum = *invoice.InvoiceNumber
+	}
+
+	customerName := "Customer"
+	if customer != nil {
+		customerName = customer.DisplayName
+	}
+
+	orgName := "Organization"
+	if org != nil {
+		orgName = org.OrganizationName
+	}
+
+	payload := shared_events.NotificationRequestedPayload{
+		OrganizationID: invoice.OrganizationID.String(),
+		Recipient:      recipientEmail,
+		Subject:        fmt.Sprintf("Invoice %s from %s", invNum, orgName),
+		TemplateName:   "invoice_sent",
+		TemplateData: map[string]interface{}{
+			"invoice_number": invNum,
+			"customer_name":  customerName,
+			"subject":        invoice.Subject,
+			"currency":       invoice.Currency,
+			"total_amount":   fmt.Sprintf("%.2f", invoice.TotalAmount),
+			"due_date":       invoice.DueDate.Format("2006-01-02"),
+		},
+		SourceService: "billing-service",
+		ReferenceID:   invoice.ID.String(),
+		ReferenceType: "invoice",
+		Attachments:   attachments,
+	}
+
+	notifMetadata := shared_events.NewEventMetadata(
+		shared_events.NotificationRequested,
+		shared_events.AggregateNotification,
+		invoice.ID.String(),
+	)
+
+	err := s.eventPublisher.Publish(ctx, notifMetadata, payload)
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to publish notification request for invoice %s: %v\n", invoice.ID, err)
+	} else {
+		fmt.Printf("[INFO] Published notification request for invoice %s to %s\n", invoice.ID, recipientEmail)
+	}
 }

@@ -161,6 +161,11 @@ func AutoMigrate(db *gorm.DB) error {
 		return fmt.Errorf("failed to auto migrate: %w", err)
 	}
 
+	// Drop obsolete notes columns from service_appointments_readonly replica table
+	if err := db.Exec("ALTER TABLE IF EXISTS service_appointments_readonly DROP COLUMN IF EXISTS cancellation_notes, DROP COLUMN IF EXISTS termination_notes, DROP COLUMN IF EXISTS reschedule_notes").Error; err != nil {
+		log.Printf("Warning: failed to drop obsolete notes columns from service_appointments_readonly: %v", err)
+	}
+
 	log.Println("Database migrations completed successfully")
 	return nil
 }
