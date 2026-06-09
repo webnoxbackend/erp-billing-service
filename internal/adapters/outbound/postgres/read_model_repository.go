@@ -192,7 +192,7 @@ func (r *ReadModelRepository) SearchWorkOrders(ctx context.Context, orgID uuid.U
 		Model(&domain.WorkOrderRM{}).
 		Select("work_orders_readonly.*").
 		Preload("Customer").
-		Joins("JOIN service_appointments_readonly ON service_appointments_readonly.work_order_id = work_orders_readonly.id").
+		Joins("JOIN service_appointments_readonly ON service_appointments_readonly.work_order_id = work_orders_readonly.id AND service_appointments_readonly.deleted_at IS NULL").
 		Where("work_orders_readonly.organization_id = ? AND service_appointments_readonly.status = ?", orgID, "COMPLETED")
 
 	if query != "" {
@@ -331,5 +331,14 @@ func (r *ReadModelRepository) GetTechniciansForAppointment(ctx context.Context, 
 	
 	return technicians, nil
 }
+
+func (r *ReadModelRepository) GetCustomerIDsByEmailAndOrg(ctx context.Context, orgID uuid.UUID, email string) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.WithContext(ctx).Model(&domain.CustomerRM{}).
+		Where("organization_id = ? AND LOWER(email) = LOWER(?)", orgID, email).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
 
 

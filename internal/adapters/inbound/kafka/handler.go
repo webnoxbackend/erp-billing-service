@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
+	"erp-billing-service/internal/application"
+	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
 
 	shared_events "github.com/efs/shared-events"
@@ -15,11 +18,15 @@ import (
 )
 
 type EventHandler struct {
-	db *gorm.DB
+	db             *gorm.DB
+	invoiceService *application.InvoiceService
 }
 
-func NewEventHandler(db *gorm.DB) *EventHandler {
-	return &EventHandler{db: db}
+func NewEventHandler(db *gorm.DB, invoiceService *application.InvoiceService) *EventHandler {
+	return &EventHandler{
+		db:             db,
+		invoiceService: invoiceService,
+	}
 }
 
 func (h *EventHandler) HandleMessage(ctx context.Context, topic string, key string, value []byte, headers map[string]string) error {
@@ -37,7 +44,7 @@ func (h *EventHandler) Handle(ctx context.Context, data []byte) error {
 		baseEvent.Metadata.AggregateType,
 		baseEvent.Metadata.AggregateID)
 
-	return h.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	txErr := h.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		switch baseEvent.Metadata.AggregateType {
 		case shared_events.AggregateCustomer:
 			return h.handleCustomerEvent(tx, baseEvent)
@@ -68,6 +75,35 @@ func (h *EventHandler) Handle(ctx context.Context, data []byte) error {
 			return nil
 		}
 	})
+
+	if txErr != nil {
+		return txErr
+	}
+
+	// Trigger auto-invoice generation in the background upon appointment completion
+	if baseEvent.Metadata.AggregateType == shared_events.AggregateAppointment &&
+		baseEvent.Metadata.EventType == shared_events.AppointmentCompleted {
+		
+		var payload struct {
+			shared_events.AppointmentPayload
+		}
+		if err := shared_events.UnmarshalPayload(baseEvent, &payload); err == nil {
+			if payload.WorkOrderID != "" {
+				go func() {
+					log.Printf("[AutoInvoice] Detected completed appointment %s. Triggering invoice auto-generation for work order %s...", 
+						payload.AppointmentID, payload.WorkOrderID)
+					bgCtx := context.Background()
+					if err := h.autoGenerateInvoice(bgCtx, payload.WorkOrderID, payload.OrganizationID); err != nil {
+						log.Printf("[AutoInvoice] [ERROR] Failed to auto-generate invoice for work order %s: %v", payload.WorkOrderID, err)
+					}
+				}()
+			}
+		} else {
+			log.Printf("[AutoInvoice] [ERROR] Failed to unmarshal appointment payload: %v", err)
+		}
+	}
+
+	return nil
 }
 
 func (h *EventHandler) handleCustomerEvent(tx *gorm.DB, event *shared_events.BaseEvent) error {
@@ -1721,4 +1757,160 @@ func (h *EventHandler) handleUserEvent(tx *gorm.DB, event *shared_events.BaseEve
 	default:
 		return nil
 	}
+}
+
+func (h *EventHandler) autoGenerateInvoice(ctx context.Context, workOrderIDStr string, orgIDStr string) error {
+	woID, err := uuid.Parse(workOrderIDStr)
+	if err != nil {
+		return fmt.Errorf("invalid work order UUID %s: %w", workOrderIDStr, err)
+	}
+
+	orgID, err := uuid.Parse(orgIDStr)
+	if err != nil {
+		return fmt.Errorf("invalid organization UUID %s: %w", orgIDStr, err)
+	}
+
+	// 1. Check if invoice already exists to prevent double invoicing
+	var count int64
+	err = h.db.WithContext(ctx).Model(&domain.Invoice{}).
+		Where("organization_id = ? AND source_system = ? AND source_reference_id = ?", orgID, domain.SourceSystemFSM, workOrderIDStr).
+		Count(&count).Error
+	if err != nil {
+		return fmt.Errorf("failed to check existing invoice: %w", err)
+	}
+
+	if count > 0 {
+		log.Printf("[AutoInvoice] Invoice already exists for work order %s. Skipping auto-generation.", workOrderIDStr)
+		return nil
+	}
+
+	// 2. Fetch work order details from read model (replicated data)
+	var wo domain.WorkOrderRM
+	err = h.db.WithContext(ctx).
+		Preload("Customer").
+		Preload("ServiceLines").
+		Preload("PartLines").
+		First(&wo, "id = ?", woID).Error
+	if err != nil {
+		return fmt.Errorf("failed to fetch work order read model %s: %w", woID, err)
+	}
+
+	// Check if customer ID is present
+	if wo.CustomerID == nil {
+		return fmt.Errorf("work order %s has no customer ID", woID)
+	}
+
+	// Fetch customer if not preloaded (fallback)
+	if wo.Customer == nil {
+		var customer domain.CustomerRM
+		if err := h.db.WithContext(ctx).First(&customer, "id = ?", *wo.CustomerID).Error; err == nil {
+			wo.Customer = &customer
+		}
+	}
+
+	// 3. Set customer-specific currency and payment terms
+	currency := "INR"
+	paymentTerms := "Due on Receipt"
+	if wo.Customer != nil {
+		if wo.Customer.CurrencyCode != "" {
+			currency = wo.Customer.CurrencyCode
+		}
+		if wo.Customer.PaymentTerms != "" {
+			paymentTerms = wo.Customer.PaymentTerms
+		}
+	}
+
+	// 4. Map work order details to CreateInvoiceRequest DTO
+	req := dto.CreateInvoiceRequest{
+		SourceSystem:      string(domain.SourceSystemFSM),
+		SourceReferenceID: &workOrderIDStr,
+		Subject:           "Invoice for Work Order: " + wo.Summary,
+		CustomerID:        *wo.CustomerID,
+		ContactID:         wo.ContactID,
+		ServiceAddressID:  wo.ServiceAddressID,
+		BillingAddressID:  wo.BillingAddressID,
+		InvoiceDate:       time.Now().UTC(),
+		DueDate:           time.Now().UTC().AddDate(0, 0, 30), // Default Terms: Net 30
+		Currency:          currency,
+		PaymentTerms:      paymentTerms,
+		Adjustment:        wo.Adjustment - wo.Discount,
+		Items:             make([]dto.CreateInvoiceItem, 0),
+	}
+
+	// Override due date if specified in work order
+	if wo.DueDate != nil {
+		req.DueDate = *wo.DueDate
+	}
+
+	// Add service lines
+	for _, line := range wo.ServiceLines {
+		itemID := uuid.Nil
+		if line.ServiceID != nil {
+			itemID = *line.ServiceID
+		} else {
+			itemID = line.ID
+		}
+
+		req.Items = append(req.Items, dto.CreateInvoiceItem{
+			ItemID:            itemID,
+			ItemType:          "service",
+			Name:              line.Description,
+			Description:       line.Description,
+			Quantity:          line.Quantity,
+			UnitPrice:         line.ListPrice,
+			ServiceCategoryID: wo.ServiceCategoryID,
+		})
+	}
+
+	// Add part lines
+	for _, line := range wo.PartLines {
+		itemID := uuid.Nil
+		if line.PartID != nil {
+			itemID = *line.PartID
+		} else {
+			itemID = line.ID
+		}
+
+		req.Items = append(req.Items, dto.CreateInvoiceItem{
+			ItemID:            itemID,
+			ItemType:          "goods",
+			Name:              line.Description,
+			Description:       line.Description,
+			Quantity:          line.Quantity,
+			UnitPrice:         line.ListPrice,
+			ServiceCategoryID: wo.ServiceCategoryID,
+		})
+	}
+
+	// 5. Fallback check: If work order contains no items, create a generic item representing work order total
+	if len(req.Items) == 0 {
+		req.Items = append(req.Items, dto.CreateInvoiceItem{
+			ItemID:            uuid.New(),
+			ItemType:          "service",
+			Name:              "Service Charge (" + wo.Summary + ")",
+			Description:       "Service rendered under Work Order: " + wo.Summary,
+			Quantity:          1,
+			UnitPrice:         wo.GrandTotal,
+			ServiceCategoryID: wo.ServiceCategoryID,
+		})
+		// Clear adjustment since it's already captured in the unit price of fallback item
+		req.Adjustment = 0
+	}
+
+	// 6. Call invoiceService to create draft invoice
+	invoiceResp, err := h.invoiceService.CreateInvoice(ctx, orgID, req)
+	if err != nil {
+		return fmt.Errorf("failed to create draft invoice: %w", err)
+	}
+	log.Printf("[AutoInvoice] Created draft invoice %s for work order %s", invoiceResp.ID, workOrderIDStr)
+
+	// 7. Call invoiceService to send invoice (transitions to SENT, generates number, builds PDF, and emails customer)
+	_, err = h.invoiceService.SendInvoice(ctx, invoiceResp.ID, dto.SendInvoiceRequest{})
+	if err != nil {
+		return fmt.Errorf("failed to send/email invoice %s: %w", invoiceResp.ID, err)
+	}
+	log.Printf("[AutoInvoice] Successfully generated, finalized, and emailed invoice %s for work order %s", 
+		invoiceResp.ID, workOrderIDStr)
+
+	return nil
 }

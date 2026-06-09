@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	"erp-billing-service/internal/application/dto"
@@ -23,6 +25,7 @@ type InvoiceService struct {
 	auditRepo       domain.AuditLogRepository
 	eventPublisher  domain.EventPublisher
 	pdfService      *PDFService // Added for PDF generation
+	s3Service       *S3Service  // Added for S3 integration
 	inventoryClient outbound.InventoryClient
 	customerClient  outbound.CustomerClient
 }
@@ -33,6 +36,7 @@ func NewInvoiceService(
 	auditRepo domain.AuditLogRepository,
 	eventPublisher domain.EventPublisher,
 	pdfService *PDFService,
+	s3Service *S3Service,
 	inventoryClient outbound.InventoryClient,
 	customerClient outbound.CustomerClient,
 ) *InvoiceService {
@@ -42,6 +46,7 @@ func NewInvoiceService(
 		auditRepo:       auditRepo,
 		eventPublisher:  eventPublisher,
 		pdfService:      pdfService,
+		s3Service:       s3Service,
 		inventoryClient: inventoryClient,
 		customerClient:  customerClient,
 	}
@@ -867,6 +872,120 @@ func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uuid.UUID) error 
 	// s.publishInvoiceDeleted(invoice)
 
 	return nil
+}
+
+func (s *InvoiceService) GetInvoicePDFStream(ctx context.Context, id uuid.UUID) (io.ReadCloser, string, error) {
+	invoice, err := s.invoiceRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	if invoice == nil {
+		return nil, "", fmt.Errorf("invoice not found")
+	}
+
+	var pdfPath string
+	if invoice.PDFPath != nil && *invoice.PDFPath != "" && !strings.HasPrefix(*invoice.PDFPath, "/") {
+		pdfPath = *invoice.PDFPath
+	} else {
+		// Generate the local PDF file using GetInvoicePDF
+		localPath, err := s.GetInvoicePDF(ctx, id)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to generate local invoice PDF: %w", err)
+		}
+		defer os.Remove(localPath) // Clean up the local temp PDF
+
+		file, err := os.Open(localPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to open generated PDF file: %w", err)
+		}
+		defer file.Close()
+
+		// Key: {RootFolder}/invoices/{OrganizationID}/{InvoiceID}.pdf
+		s3Key := fmt.Sprintf("%s/invoices/%s/%s.pdf", s.s3Service.Config.RootFolder, invoice.OrganizationID.String(), invoice.ID.String())
+		err = s.s3Service.UploadFile(s3Key, "application/pdf", file)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to upload PDF to S3: %w", err)
+		}
+
+		pdfPath = s3Key
+		if invoice.Status != domain.InvoiceStatusDraft {
+			invoice.PDFPath = &pdfPath
+			if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
+				fmt.Printf("[ERROR] Failed to update PDFPath in DB: %v\n", err)
+			}
+		}
+	}
+
+	return s.s3Service.GetFile(pdfPath)
+}
+
+func (s *InvoiceService) ListInvoicesByCustomerEmail(ctx context.Context, orgID uuid.UUID, customerEmail string, statusFilter string) ([]dto.InvoiceResponse, error) {
+	customerIDs, err := s.rmRepo.GetCustomerIDsByEmailAndOrg(ctx, orgID, customerEmail)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup customer IDs by email: %w", err)
+	}
+	if len(customerIDs) == 0 {
+		return []dto.InvoiceResponse{}, nil
+	}
+
+	filter := map[string]interface{}{
+		"organization_id": orgID,
+		"customer_id":     customerIDs,
+	}
+	if statusFilter != "" {
+		if statusFilter == string(domain.InvoiceStatusDraft) {
+			return []dto.InvoiceResponse{}, nil
+		}
+		filter["status"] = statusFilter
+	} else {
+		filter["status"] = []string{
+			string(domain.InvoiceStatusSent),
+			string(domain.InvoiceStatusPartial),
+			string(domain.InvoiceStatusPaid),
+			string(domain.InvoiceStatusOverdue),
+			string(domain.InvoiceStatusVoid),
+			string(domain.InvoiceStatusCancelled),
+		}
+	}
+
+	invoices, err := s.invoiceRepo.List(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list customer invoices: %w", err)
+	}
+
+	res := make([]dto.InvoiceResponse, 0, len(invoices))
+	for _, inv := range invoices {
+		res = append(res, *s.mapToResponse(ctx, &inv))
+	}
+	return res, nil
+}
+
+func (s *InvoiceService) GetCustomerInvoice(ctx context.Context, id uuid.UUID, customerEmail string) (*dto.InvoiceResponse, error) {
+	invoice, err := s.invoiceRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if invoice == nil {
+		return nil, fmt.Errorf("invoice not found")
+	}
+
+	if invoice.Status == domain.InvoiceStatusDraft {
+		return nil, fmt.Errorf("invoice not found")
+	}
+
+	customer, err := s.rmRepo.GetCustomer(ctx, invoice.CustomerID)
+	if err != nil && s.customerClient != nil {
+		customer, _ = s.customerClient.GetCustomer(ctx, invoice.CustomerID)
+	}
+	if customer == nil {
+		return nil, fmt.Errorf("customer not found")
+	}
+
+	if strings.ToLower(customer.Email) != strings.ToLower(customerEmail) {
+		return nil, fmt.Errorf("unauthorized: invoice does not belong to you")
+	}
+
+	return s.mapToResponse(ctx, invoice), nil
 }
 
 func (s *InvoiceService) ListInvoices(ctx context.Context, orgID uuid.UUID) ([]dto.InvoiceResponse, error) {

@@ -80,14 +80,29 @@ func main() {
 	// 5.7 Initialize Customer Client (HTTP for synchronous fallback)
 	customerClient := outbound_http.NewCustomerHTTPClient(cfg.CustomerServiceURL)
 
+	// 5.8 Initialize S3 Service
+	s3Config := &application.S3Config{
+		BucketName:   cfg.S3BucketName,
+		Region:       cfg.S3Region,
+		AccessKey:    cfg.S3AccessKey,
+		SecretKey:    cfg.S3SecretKey,
+		Endpoint:     cfg.S3Endpoint,
+		RootFolder:   cfg.S3RootFolder,
+		UploadExpiry: cfg.S3PresignedUploadExpiry,
+	}
+	s3Service, err := application.NewS3Service(s3Config)
+	if err != nil {
+		log.Fatalf("Failed to initialize S3 service: %v", err)
+	}
+
 	// 6. Initialize Services
-	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService, inventoryClient, customerClient)
+	invoiceService := application.NewInvoiceService(invoiceRepo, rmRepo, auditRepo, eventPublisher, pdfService, s3Service, inventoryClient, customerClient)
 	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, salesOrderRepo, rmRepo, auditRepo, eventPublisher)
 	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, rmRepo, eventPublisher, inventoryClient, customerClient)
 	salesReturnService := application.NewSalesReturnService(salesReturnRepo, salesOrderRepo, invoiceRepo, paymentRepo, rmRepo, eventPublisher, inventoryClient)
 
 	// 7. Initialize Kafka Consumers
-	eventHandler := kafka.NewEventHandler(db)
+	eventHandler := kafka.NewEventHandler(db, invoiceService)
 	topics := []string{
 		"crm.customers",
 		"crm.contacts",
@@ -117,9 +132,17 @@ func main() {
 	salesReturnHandler := billing_http.NewSalesReturnHandler(salesReturnService)
 	rmHandler := billing_http.NewReadModelHandler(rmRepo)
 	estimateInvoiceHandler := billing_http.NewEstimateInvoiceHandler(invoiceService)
+	customerInvoiceHandler := billing_http.NewCustomerInvoiceHandler(invoiceService, paymentService)
 
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api/v1").Subrouter()
+
+	// Customer Invoice Routes
+	api.HandleFunc("/customer/invoices", customerInvoiceHandler.ListCustomerInvoices).Methods("GET")
+	api.HandleFunc("/customer/invoices/{id}", customerInvoiceHandler.GetCustomerInvoice).Methods("GET")
+	api.HandleFunc("/customer/invoices/{id}/payments", customerInvoiceHandler.GetCustomerInvoicePayments).Methods("GET")
+	api.HandleFunc("/customer/payments", customerInvoiceHandler.RecordCustomerPayment).Methods("POST")
+	api.HandleFunc("/customer/invoices/{id}/pdf", customerInvoiceHandler.DownloadCustomerInvoicePDF).Methods("GET")
 
 	// Invoice Routes
 	api.HandleFunc("/billing/invoices", invoiceHandler.CreateInvoice).Methods("POST")

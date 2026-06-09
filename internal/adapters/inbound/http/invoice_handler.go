@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
 	"erp-billing-service/internal/application"
@@ -249,7 +250,7 @@ func (h *InvoiceHandler) SendInvoice(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(invoice)
 }
 
-// DownloadInvoicePDF handles PDF download requests
+// DownloadInvoicePDF handles PDF download requests by streaming from S3
 func (h *InvoiceHandler) DownloadInvoicePDF(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := uuid.Parse(vars["id"])
@@ -258,25 +259,24 @@ func (h *InvoiceHandler) DownloadInvoicePDF(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	pdfPath, err := h.service.GetInvoicePDF(r.Context(), id)
+	reader, contentType, err := h.service.GetInvoicePDFStream(r.Context(), id)
 	if err != nil {
-		if err.Error() == "invoice not found" {
+		if strings.Contains(err.Error(), "not found") {
 			http.Error(w, err.Error(), http.StatusNotFound)
-		} else if err.Error() == "invoice must be generated" { // Updated message if applicable
-			http.Error(w, err.Error(), http.StatusBadRequest)
 		} else {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		return
 	}
+	defer reader.Close()
 
-	// Serve the PDF file
-	w.Header().Set("Content-Type", "application/pdf")
+	// Serve the PDF file stream
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", "attachment; filename=invoice-"+id.String()+".pdf")
-	http.ServeFile(w, r, pdfPath)
+	io.Copy(w, reader)
 }
 
-// PreviewInvoicePDF handles PDF preview requests (inline display)
+// PreviewInvoicePDF handles PDF preview requests (inline display) by streaming from S3
 func (h *InvoiceHandler) PreviewInvoicePDF(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := uuid.Parse(vars["id"])
@@ -285,20 +285,19 @@ func (h *InvoiceHandler) PreviewInvoicePDF(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	pdfPath, err := h.service.GetInvoicePDF(r.Context(), id)
+	reader, contentType, err := h.service.GetInvoicePDFStream(r.Context(), id)
 	if err != nil {
-		if err.Error() == "invoice not found" {
+		if strings.Contains(err.Error(), "not found") {
 			http.Error(w, err.Error(), http.StatusNotFound)
-		} else if err.Error() == "invoice must be generated" {
-			http.Error(w, err.Error(), http.StatusBadRequest)
 		} else {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		return
 	}
+	defer reader.Close()
 
 	// Serve the PDF file for inline display
-	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", "inline; filename=invoice-"+id.String()+".pdf")
-	http.ServeFile(w, r, pdfPath)
+	io.Copy(w, reader)
 }
