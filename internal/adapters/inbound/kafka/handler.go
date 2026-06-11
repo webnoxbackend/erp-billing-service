@@ -1795,6 +1795,13 @@ func (h *EventHandler) autoGenerateInvoice(ctx context.Context, workOrderIDStr s
 		return fmt.Errorf("failed to fetch work order read model %s: %w", woID, err)
 	}
 
+	// Debug: confirm service_category_id is loaded from DB
+	if wo.ServiceCategoryID != nil {
+		log.Printf("[AutoInvoice] wo.ServiceCategoryID = %s for work order %s", wo.ServiceCategoryID.String(), workOrderIDStr)
+	} else {
+		log.Printf("[AutoInvoice] wo.ServiceCategoryID is NIL for work order %s", workOrderIDStr)
+	}
+
 	// Check if customer ID is present
 	if wo.CustomerID == nil {
 		return fmt.Errorf("work order %s has no customer ID", woID)
@@ -1829,6 +1836,7 @@ func (h *EventHandler) autoGenerateInvoice(ctx context.Context, workOrderIDStr s
 		ContactID:         wo.ContactID,
 		ServiceAddressID:  wo.ServiceAddressID,
 		BillingAddressID:  wo.BillingAddressID,
+		ServiceCategoryID: wo.ServiceCategoryID,
 		InvoiceDate:       time.Now().UTC(),
 		DueDate:           time.Now().UTC().AddDate(0, 0, 30), // Default Terms: Net 30
 		Currency:          currency,
@@ -1873,7 +1881,7 @@ func (h *EventHandler) autoGenerateInvoice(ctx context.Context, workOrderIDStr s
 
 		req.Items = append(req.Items, dto.CreateInvoiceItem{
 			ItemID:            itemID,
-			ItemType:          "goods",
+			ItemType:          "part",
 			Name:              line.Description,
 			Description:       line.Description,
 			Quantity:          line.Quantity,
@@ -1898,6 +1906,11 @@ func (h *EventHandler) autoGenerateInvoice(ctx context.Context, workOrderIDStr s
 	}
 
 	// 6. Call invoiceService to create draft invoice
+	if req.ServiceCategoryID != nil {
+		log.Printf("[AutoInvoice] req.ServiceCategoryID = %s before CreateInvoice", req.ServiceCategoryID.String())
+	} else {
+		log.Printf("[AutoInvoice] req.ServiceCategoryID is NIL before CreateInvoice")
+	}
 	invoiceResp, err := h.invoiceService.CreateInvoice(ctx, orgID, req)
 	if err != nil {
 		return fmt.Errorf("failed to create draft invoice: %w", err)

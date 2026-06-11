@@ -141,6 +141,7 @@ func main() {
 	api.HandleFunc("/customer/invoices", customerInvoiceHandler.ListCustomerInvoices).Methods("GET")
 	api.HandleFunc("/customer/invoices/{id}", customerInvoiceHandler.GetCustomerInvoice).Methods("GET")
 	api.HandleFunc("/customer/invoices/{id}/payments", customerInvoiceHandler.GetCustomerInvoicePayments).Methods("GET")
+	api.HandleFunc("/customer/payments", customerInvoiceHandler.ListCustomerPayments).Methods("GET")
 	api.HandleFunc("/customer/payments", customerInvoiceHandler.RecordCustomerPayment).Methods("POST")
 	api.HandleFunc("/customer/invoices/{id}/pdf", customerInvoiceHandler.DownloadCustomerInvoicePDF).Methods("GET")
 

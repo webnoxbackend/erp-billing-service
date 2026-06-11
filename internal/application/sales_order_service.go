@@ -376,11 +376,17 @@ func (s *SalesOrderService) CreateInvoiceFromOrder(orderID uuid.UUID) (*dto.Invo
 
 	// Copy items
 	for _, orderItem := range salesOrder.Items {
+		itemType := "service"
+		itemTypeLower := strings.ToLower(orderItem.ItemType)
+		if itemTypeLower == "goods" || itemTypeLower == "product" || itemTypeLower == "part" {
+			itemType = "part"
+		}
+
 		invoiceItem := domain.InvoiceItem{
 			ID:          uuid.New(),
 			InvoiceID:   invoice.ID,
 			ItemID:      orderItem.ItemID,
-			ItemType:    orderItem.ItemType,
+			ItemType:    itemType,
 			Name:        orderItem.Name,
 			Description: orderItem.Description,
 			Quantity:    orderItem.Quantity,

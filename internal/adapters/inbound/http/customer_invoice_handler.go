@@ -138,6 +138,36 @@ func (h *CustomerInvoiceHandler) GetCustomerInvoicePayments(w http.ResponseWrite
 	})
 }
 
+// ListCustomerPayments handles GET /api/v1/customer/payments
+// Returns all payments made by the authenticated customer.
+func (h *CustomerInvoiceHandler) ListCustomerPayments(w http.ResponseWriter, r *http.Request) {
+	customerEmail := r.Header.Get("X-Customer-Email")
+	if customerEmail == "" {
+		customerEmail = r.Header.Get("X-User-ID")
+	}
+	if customerEmail == "" {
+		http.Error(w, "customer identity not found in token", http.StatusUnauthorized)
+		return
+	}
+
+	orgIDStr := r.Header.Get("X-Organization-ID")
+	orgID, _ := uuid.Parse(orgIDStr)
+
+	statusFilter := strings.ToLower(r.URL.Query().Get("status"))
+
+	payments, err := h.paymentService.ListPaymentsByCustomerEmail(r.Context(), orgID, customerEmail, statusFilter)
+	if err != nil {
+		fmt.Printf("[ERROR] ListCustomerPayments failed for email %s: %v\n", customerEmail, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": payments,
+	})
+}
+
 // RecordCustomerPayment handles POST /api/v1/customer/payments
 // Allows a customer to record a payment intent for their invoice.
 func (h *CustomerInvoiceHandler) RecordCustomerPayment(w http.ResponseWriter, r *http.Request) {

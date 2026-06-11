@@ -34,3 +34,11 @@ type PaymentResponse struct {
 type VoidPaymentRequest struct {
 	Notes string `json:"notes"`
 }
+
+// CustomerPaymentHistoryResponse represents a customer's payment history and outstanding invoices
+type CustomerPaymentHistoryResponse struct {
+	Completed     []*PaymentResponse `json:"completed"`
+	PartiallyPaid []InvoiceResponse  `json:"partially_paid"`
+	Unpaid        []InvoiceResponse  `json:"unpaid"`
+}
+

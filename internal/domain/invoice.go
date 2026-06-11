@@ -32,14 +32,14 @@ const (
 
 type Invoice struct {
 	ID             uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
-	OrganizationID uuid.UUID  `gorm:"type:uuid;index" json:"organization_id"`
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index;uniqueIndex:idx_invoices_org_invoice_number" json:"organization_id"`
 	CustomerID     uuid.UUID  `gorm:"type:uuid;index" json:"customer_id"`
 	ContactID      *uuid.UUID `gorm:"type:uuid;index" json:"contact_id"`
 	OwnerID        *uuid.UUID `gorm:"type:uuid;index" json:"owner_id"`
 	Subject        string     `gorm:"type:varchar(255)" json:"subject"`
 
 	// Invoice number is nullable - only generated when invoice is SENT
-	InvoiceNumber *string `gorm:"type:varchar(50);uniqueIndex" json:"invoice_number"`
+	InvoiceNumber *string `gorm:"type:varchar(50);uniqueIndex:idx_invoices_org_invoice_number" json:"invoice_number"`
 
 	// Source-agnostic fields - Billing doesn't know about FSM/CRM/Inventory internals
 	// It only stores opaque references to link back to the originating module

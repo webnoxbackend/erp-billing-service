@@ -66,3 +66,14 @@ func (r *PaymentRepository) ListByModule(ctx context.Context, orgID uuid.UUID, s
 	return payments, err
 }
 
+func (r *PaymentRepository) ListByCustomerIDs(ctx context.Context, orgID uuid.UUID, customerIDs []uuid.UUID) ([]domain.Payment, error) {
+	var payments []domain.Payment
+	err := r.db.WithContext(ctx).
+		Joins("JOIN invoices ON invoices.id = payments.invoice_id").
+		Where("payments.organization_id = ? AND invoices.customer_id IN ?", orgID, customerIDs).
+		Order("payments.payment_date desc").
+		Find(&payments).Error
+	return payments, err
+}
+
+

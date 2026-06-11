@@ -18,6 +18,7 @@ type CreateInvoiceFromEstimateRequest struct {
 	ServiceAddressID  *uuid.UUID `json:"service_address_id,omitempty"`
 	BillingAddressID  *uuid.UUID `json:"billing_address_id,omitempty"`
 	ShippingAddressID *uuid.UUID `json:"shipping_address_id,omitempty"`
+	ServiceCategoryID *uuid.UUID `json:"service_category_id,omitempty"`
 	
 	// Totals from estimate
 	SubTotal       float64    `json:"sub_total"`
@@ -46,6 +47,7 @@ type CreateInvoiceFromEstimateRequest struct {
 // EstimateItemDTO represents a line item from an estimate
 type EstimateItemDTO struct {
 	ItemID      string  `json:"item_id"`
+	ItemType    string  `json:"item_type,omitempty"`
 	Description string  `json:"description"`
 	Quantity    float64 `json:"quantity"`
 	UnitPrice   float64 `json:"unit_price"`

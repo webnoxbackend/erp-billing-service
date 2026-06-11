@@ -923,7 +923,8 @@ func (s *PDFService) GenerateInvoicePDF(
 	var parts []domain.InvoiceItem
 
 	for _, item := range invoice.Items {
-		if item.ItemType == "part" {
+		itemTypeLower := strings.ToLower(item.ItemType)
+		if itemTypeLower == "part" || itemTypeLower == "goods" || itemTypeLower == "product" {
 			parts = append(parts, item)
 		} else {
 			services = append(services, item)

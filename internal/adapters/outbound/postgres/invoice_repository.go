@@ -219,15 +219,27 @@ func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *InvoiceRepository) GetNextInvoiceNumber(ctx context.Context, orgID uuid.UUID) (string, error) {
-	var count int64
-	err := r.db.WithContext(ctx).Model(&domain.Invoice{}).Where("organization_id = ?", orgID).Count(&count).Error
+	year := time.Now().Year()
+	prefix := fmt.Sprintf("INV-%d-", year)
+
+	var invoiceNumbers []string
+	err := r.db.WithContext(ctx).Model(&domain.Invoice{}).
+		Where("organization_id = ? AND invoice_number LIKE ?", orgID, prefix+"%").
+		Pluck("invoice_number", &invoiceNumbers).Error
 	if err != nil {
 		return "", err
 	}
 
-	// Example format: INV-2023-0001
-	year := time.Now().Year()
-	return fmt.Sprintf("INV-%d-%04d", year, count+1), nil
+	maxSeq := 0
+	for _, num := range invoiceNumbers {
+		var y, seq int
+		_, err := fmt.Sscanf(num, "INV-%d-%d", &y, &seq)
+		if err == nil && seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+
+	return fmt.Sprintf("INV-%d-%04d", year, maxSeq+1), nil
 }
 
 func (r *InvoiceRepository) ClearItems(ctx context.Context, invoiceID uuid.UUID) error {

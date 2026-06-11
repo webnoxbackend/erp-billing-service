@@ -249,6 +249,175 @@ func (s *PaymentService) ListPaymentsByInvoice(ctx context.Context, invoiceID uu
 	return responses, nil
 }
 
+// ListPaymentsByCustomerEmail lists all payments and outstanding invoices for a customer email, optionally filtered by status
+func (s *PaymentService) ListPaymentsByCustomerEmail(ctx context.Context, orgID uuid.UUID, customerEmail string, statusFilter string) (*dto.CustomerPaymentHistoryResponse, error) {
+	customerIDs, err := s.rmRepo.GetCustomerIDsByEmailAndOrg(ctx, orgID, customerEmail)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup customer IDs by email: %w", err)
+	}
+	if len(customerIDs) == 0 {
+		return &dto.CustomerPaymentHistoryResponse{
+			Completed:     []*dto.PaymentResponse{},
+			PartiallyPaid: []dto.InvoiceResponse{},
+			Unpaid:        []dto.InvoiceResponse{},
+		}, nil
+	}
+
+	completedResponses := make([]*dto.PaymentResponse, 0)
+	partiallyPaidInvoices := make([]dto.InvoiceResponse, 0)
+	unpaidInvoices := make([]dto.InvoiceResponse, 0)
+
+	// Determine what we need to fetch based on statusFilter
+	fetchPayments := statusFilter == "" || statusFilter == "completed"
+	fetchInvoices := statusFilter == "" || statusFilter == "partially_paid" || statusFilter == "unpaid"
+
+	// 1. Fetch completed payments if required
+	if fetchPayments {
+		payments, err := s.paymentRepo.ListByCustomerIDs(ctx, orgID, customerIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list customer payments: %w", err)
+		}
+
+		for _, payment := range payments {
+			if payment.Status == domain.PaymentStatusCompleted {
+				completedResponses = append(completedResponses, s.mapToResponse(ctx, &payment))
+			}
+		}
+	}
+
+	// 2. Fetch customer invoices if required
+	if fetchInvoices {
+		invoiceFilter := map[string]interface{}{
+			"organization_id": orgID,
+			"customer_id":     customerIDs,
+		}
+		invoices, err := s.invoiceRepo.List(ctx, invoiceFilter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list customer invoices: %w", err)
+		}
+
+		for _, inv := range invoices {
+			switch inv.Status {
+			case domain.InvoiceStatusPartial:
+				if statusFilter == "" || statusFilter == "partially_paid" {
+					partiallyPaidInvoices = append(partiallyPaidInvoices, s.mapInvoiceToResponse(ctx, &inv))
+				}
+			case domain.InvoiceStatusSent, domain.InvoiceStatusOverdue:
+				if statusFilter == "" || statusFilter == "unpaid" {
+					unpaidInvoices = append(unpaidInvoices, s.mapInvoiceToResponse(ctx, &inv))
+				}
+			}
+		}
+	}
+
+	return &dto.CustomerPaymentHistoryResponse{
+		Completed:     completedResponses,
+		PartiallyPaid: partiallyPaidInvoices,
+		Unpaid:        unpaidInvoices,
+	}, nil
+}
+
+func (s *PaymentService) mapInvoiceToResponse(ctx context.Context, inv *domain.Invoice) dto.InvoiceResponse {
+	res := dto.InvoiceResponse{
+		ID:            inv.ID,
+		InvoiceNumber: inv.InvoiceNumber,
+		SourceSystem:      string(inv.SourceSystem),
+		SourceReferenceID: inv.SourceReferenceID,
+		Subject:         inv.Subject,
+		Status:          string(inv.Status),
+		SubTotal:        inv.SubTotal,
+		DiscountTotal:   inv.DiscountTotal,
+		TaxTotal:        inv.TaxTotal,
+		TotalAmount:     inv.TotalAmount,
+		PaidAmount:      inv.PaidAmount,
+		BalanceAmount:   inv.BalanceAmount,
+		Adjustment:      inv.Adjustment,
+		ExciseDuty:      inv.ExciseDuty,
+		SalesCommission: inv.SalesCommission,
+		SalesOrder:      inv.SalesOrder,
+		PurchaseOrder:   inv.PurchaseOrder,
+		PaymentTerms:    inv.PaymentTerms,
+		Currency:        inv.Currency,
+		ServiceCategoryID: inv.ServiceCategoryID,
+		OwnerID:         inv.OwnerID,
+		CustomerID:        inv.CustomerID,
+		ContactID:         inv.ContactID,
+		InvoiceDate:       ConvertToOrgTZValue(ctx, inv.InvoiceDate, inv.OrganizationID, s.rmRepo),
+		DueDate:         ConvertToOrgTZValue(ctx, inv.DueDate, inv.OrganizationID, s.rmRepo),
+		CreatedAt:       ConvertToOrgTZValue(ctx, inv.CreatedAt, inv.OrganizationID, s.rmRepo),
+		UpdatedAt:       ConvertToOrgTZValue(ctx, inv.UpdatedAt, inv.OrganizationID, s.rmRepo),
+		PDFPath: inv.PDFPath,
+		BillingAddressID:  inv.BillingAddressID,
+		ShippingAddressID: inv.ShippingAddressID,
+		ServiceAddressID:  inv.ServiceAddressID,
+		BillingStreet:   inv.BillingStreet,
+		BillingCity:     inv.BillingCity,
+		BillingState:    inv.BillingState,
+		BillingCode:     inv.BillingCode,
+		BillingCountry:  inv.BillingCountry,
+		ShippingStreet:  inv.ShippingStreet,
+		ShippingCity:    inv.ShippingCity,
+		ShippingState:   inv.ShippingState,
+		ShippingCode:    inv.ShippingCode,
+		ShippingCountry: inv.ShippingCountry,
+		Notes:           inv.Notes,
+		Terms:           inv.Terms,
+	}
+
+	customer, err := s.rmRepo.GetCustomer(ctx, inv.CustomerID)
+	if err == nil && customer != nil {
+		res.Customer = &dto.CustomerResponse{
+			ID:          customer.ID,
+			DisplayName: customer.DisplayName,
+			CompanyName: customer.CompanyName,
+		}
+	} else {
+		res.Customer = &dto.CustomerResponse{
+			ID:          inv.CustomerID,
+			DisplayName: "Unknown Customer",
+			CompanyName: "Unknown Customer",
+		}
+	}
+
+	var contact *domain.ContactRM
+	if inv.ContactID != nil {
+		contact, _ = s.rmRepo.GetContact(ctx, *inv.ContactID)
+	} else {
+		contact, _ = s.rmRepo.GetPrimaryContact(ctx, inv.CustomerID)
+	}
+
+	if contact != nil {
+		res.Contact = &dto.ContactResponse{
+			ID:        contact.ID,
+			FirstName: contact.FirstName,
+			LastName:  contact.LastName,
+			Email:     contact.Email,
+		}
+	}
+
+	if len(inv.Items) > 0 {
+		res.Items = make([]dto.ItemResponse, 0, len(inv.Items))
+		for _, item := range inv.Items {
+			itemResp := dto.ItemResponse{
+				ItemID:            item.ItemID,
+				ItemType:          item.ItemType,
+				Name:              item.Name,
+				Description:       item.Description,
+				Quantity:          item.Quantity,
+				UnitPrice:         item.UnitPrice,
+				Discount:          item.Discount,
+				Tax:               item.Tax,
+				Total:             item.Total,
+				ServiceCategoryID: item.ServiceCategoryID,
+			}
+			res.Items = append(res.Items, itemResp)
+		}
+	}
+
+	return res
+}
+
+
 // GetPayment returns a single payment by ID
 func (s *PaymentService) GetPayment(ctx context.Context, paymentID uuid.UUID) (*dto.PaymentResponse, error) {
 	payment, err := s.paymentRepo.GetByID(ctx, paymentID)

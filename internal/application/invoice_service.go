@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -61,6 +62,13 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		sourceSystem = domain.SourceSystem(req.SourceSystem)
 	}
 
+	// Debug: trace ServiceCategoryID at CreateInvoice entry
+	if req.ServiceCategoryID != nil {
+		log.Printf("[CreateInvoice] req.ServiceCategoryID = %s (source: %s)", req.ServiceCategoryID.String(), sourceSystem)
+	} else {
+		log.Printf("[CreateInvoice] req.ServiceCategoryID is NIL (source: %s)", sourceSystem)
+	}
+
 	ownerID := req.OwnerID
 	if ownerID == nil {
 		if adminUUID, err := s.rmRepo.GetOrganizationAdminID(ctx, orgID); err == nil {
@@ -76,7 +84,7 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 
 	var customerRM *domain.CustomerRM
 	if billingAddressID == nil || shippingAddressID == nil || serviceAddressID == nil {
-		if customer, err := s.rmRepo.GetCustomer(ctx, req.CustomerID); err == nil && customer != nil {
+		if customer, err := s.getCustomer(ctx, req.CustomerID); err == nil && customer != nil {
 			customerRM = customer
 			if billingAddressID == nil {
 				billingAddressID = customer.BillingAddressID
@@ -105,7 +113,7 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 
 	if billingStreet == "" || shippingStreet == "" {
 		if customerRM == nil {
-			if customer, err := s.rmRepo.GetCustomer(ctx, req.CustomerID); err == nil && customer != nil {
+			if customer, err := s.getCustomer(ctx, req.CustomerID); err == nil && customer != nil {
 				customerRM = customer
 			}
 		}
@@ -237,11 +245,27 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 			metadataJSON = metadataBytes
 		}
 
+		itemType := "service"
+		itemTypeLower := strings.ToLower(itemReq.ItemType)
+		if itemTypeLower == "goods" || itemTypeLower == "product" || itemTypeLower == "part" {
+			itemType = "part"
+		} else if itemTypeLower == "service" {
+			itemType = "service"
+		} else {
+			// Fallback: Check read model if not explicitly set
+			if itemRM != nil {
+				rmTypeLower := strings.ToLower(itemRM.Type)
+				if rmTypeLower == "goods" || rmTypeLower == "product" || rmTypeLower == "part" {
+					itemType = "part"
+				}
+			}
+		}
+
 		items = append(items, domain.InvoiceItem{
 			ID:                uuid.New(),
 			InvoiceID:         invoiceID,
 			ItemID:            itemReq.ItemID,
-			ItemType:          itemReq.ItemType,
+			ItemType:          itemType,
 			Name:              itemName,
 			Description:       itemReq.Description,
 			Quantity:          itemReq.Quantity,
@@ -309,7 +333,7 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 
 	var customerRM *domain.CustomerRM
 	if billingAddressID == nil || shippingAddressID == nil || serviceAddressID == nil {
-		if customer, err := s.rmRepo.GetCustomer(ctx, req.CustomerID); err == nil && customer != nil {
+		if customer, err := s.getCustomer(ctx, req.CustomerID); err == nil && customer != nil {
 			customerRM = customer
 			if billingAddressID == nil {
 				billingAddressID = customer.BillingAddressID
@@ -337,7 +361,7 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 
 	if billingStreet == "" || shippingStreet == "" {
 		if customerRM == nil {
-			if customer, err := s.rmRepo.GetCustomer(ctx, req.CustomerID); err == nil && customer != nil {
+			if customer, err := s.getCustomer(ctx, req.CustomerID); err == nil && customer != nil {
 				customerRM = customer
 			}
 		}
@@ -390,6 +414,7 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 		ShippingState:     shippingState,
 		ShippingCode:      shippingCode,
 		ShippingCountry:   shippingCountry,
+		ServiceCategoryID: req.ServiceCategoryID,
 	}
 
 	// Convert estimate items to invoice items
@@ -399,17 +424,37 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 	for _, itemReq := range req.Items {
 		itemTotal := (itemReq.Quantity * itemReq.UnitPrice) - itemReq.Discount + itemReq.Tax
 
+		itemType := "service"
+		itemTypeLower := strings.ToLower(itemReq.ItemType)
+		if itemTypeLower == "goods" || itemTypeLower == "product" || itemTypeLower == "part" {
+			itemType = "part"
+		} else if itemTypeLower == "service" {
+			itemType = "service"
+		} else {
+			// Fallback: Check read model
+			if itemUUID, err := uuid.Parse(itemReq.ItemID); err == nil {
+				if itemRM, err := s.rmRepo.GetItem(ctx, itemUUID); err == nil && itemRM != nil {
+					rmTypeLower := strings.ToLower(itemRM.Type)
+					if rmTypeLower == "goods" || rmTypeLower == "product" || rmTypeLower == "part" {
+						itemType = "part"
+					}
+				}
+			}
+		}
+
 		items = append(items, domain.InvoiceItem{
-			ID:          uuid.New(),
-			InvoiceID:   invoiceID,
-			ItemID:      uuid.MustParse(itemReq.ItemID), // Assuming valid UUID from CRM
-			Name:        itemReq.Description,
-			Description: itemReq.Description,
-			Quantity:    itemReq.Quantity,
-			UnitPrice:   itemReq.UnitPrice,
-			Discount:    itemReq.Discount,
-			Tax:         itemReq.Tax,
-			Total:       itemTotal,
+			ID:                uuid.New(),
+			InvoiceID:         invoiceID,
+			ItemID:            uuid.MustParse(itemReq.ItemID), // Assuming valid UUID from CRM
+			ItemType:          itemType,
+			Name:              itemReq.Description,
+			Description:       itemReq.Description,
+			Quantity:          itemReq.Quantity,
+			UnitPrice:         itemReq.UnitPrice,
+			Discount:          itemReq.Discount,
+			Tax:               itemReq.Tax,
+			Total:             itemTotal,
+			ServiceCategoryID: req.ServiceCategoryID,
 		})
 
 		subTotal += (itemReq.Quantity * itemReq.UnitPrice)
@@ -567,11 +612,27 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 			metadataJSON = metadataBytes
 		}
 
+		itemType := "service"
+		itemTypeLower := strings.ToLower(itemReq.ItemType)
+		if itemTypeLower == "goods" || itemTypeLower == "product" || itemTypeLower == "part" {
+			itemType = "part"
+		} else if itemTypeLower == "service" {
+			itemType = "service"
+		} else {
+			// Fallback: Check read model
+			if itemRM != nil {
+				rmTypeLower := strings.ToLower(itemRM.Type)
+				if rmTypeLower == "goods" || rmTypeLower == "product" || rmTypeLower == "part" {
+					itemType = "part"
+				}
+			}
+		}
+
 		items = append(items, domain.InvoiceItem{
 			ID:                uuid.New(),
 			InvoiceID:         invoice.ID,
 			ItemID:            itemReq.ItemID,
-			ItemType:          itemReq.ItemType,
+			ItemType:          itemType,
 			Name:              itemName,
 			Description:       itemReq.Description,
 			Quantity:          itemReq.Quantity,
@@ -627,7 +688,7 @@ func (s *InvoiceService) SendInvoice(ctx context.Context, id uuid.UUID, req dto.
 	invoice.InvoiceNumber = &invNum
 
 	// 4. Generate PDF
-	customer, err := s.rmRepo.GetCustomer(ctx, invoice.CustomerID)
+	customer, err := s.getCustomer(ctx, invoice.CustomerID)
 	if err != nil || customer == nil {
 		fmt.Printf("[WARNING] Customer %s not found for SendInvoice PDF. Using placeholder.\n", invoice.CustomerID)
 		customer = &domain.CustomerRM{
@@ -788,7 +849,7 @@ func (s *InvoiceService) GetInvoicePDF(ctx context.Context, id uuid.UUID) (strin
 
 	// 4. Generate PDF (or regenerate for draft invoices)
 	// Get customer for PDF generation
-	customer, err := s.rmRepo.GetCustomer(ctx, invoice.CustomerID) // Changed from s.customerRepo.GetByID
+	customer, err := s.getCustomer(ctx, invoice.CustomerID)
 	if err != nil || customer == nil {
 		fmt.Printf("[WARNING] Customer %s not found for GetInvoicePDF. Using placeholder.\n", invoice.CustomerID)
 		customer = &domain.CustomerRM{
@@ -973,11 +1034,8 @@ func (s *InvoiceService) GetCustomerInvoice(ctx context.Context, id uuid.UUID, c
 		return nil, fmt.Errorf("invoice not found")
 	}
 
-	customer, err := s.rmRepo.GetCustomer(ctx, invoice.CustomerID)
-	if err != nil && s.customerClient != nil {
-		customer, _ = s.customerClient.GetCustomer(ctx, invoice.CustomerID)
-	}
-	if customer == nil {
+	customer, err := s.getCustomer(ctx, invoice.CustomerID)
+	if err != nil || customer == nil {
 		return nil, fmt.Errorf("customer not found")
 	}
 
@@ -1070,18 +1128,7 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 	}
 
 	// Fetch Customer details from Read Model or fallback to HTTP client
-	customer, err := s.rmRepo.GetCustomer(ctx, inv.CustomerID)
-
-	// Fallback to HTTP client if customer is missing OR has empty name (corrupted read model)
-	if (err != nil || customer == nil || customer.DisplayName == "") && s.customerClient != nil {
-		fmt.Printf("[INFO] Customer %s missing or invalid in ReadModel, fetching from Customer Service\n", inv.CustomerID)
-		remoteCustomer, remoteErr := s.customerClient.GetCustomer(ctx, inv.CustomerID)
-		if remoteErr == nil && remoteCustomer != nil {
-			customer = remoteCustomer
-			// Option: We could update the Read Model here to self-heal permanently?
-			// But for now, just returning correct data is enough.
-		}
-	}
+	customer, _ := s.getCustomer(ctx, inv.CustomerID)
 
 	if customer != nil {
 		res.Customer = &dto.CustomerResponse{
@@ -1149,6 +1196,18 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 	}
 
 	return res
+}
+
+func (s *InvoiceService) getCustomer(ctx context.Context, id uuid.UUID) (*domain.CustomerRM, error) {
+	customer, err := s.rmRepo.GetCustomer(ctx, id)
+	if (err != nil || customer == nil || customer.DisplayName == "") && s.customerClient != nil {
+		fmt.Printf("[INFO] Customer %s missing or invalid in ReadModel, fetching from Customer Service\n", id)
+		remoteCustomer, remoteErr := s.customerClient.GetCustomer(ctx, id)
+		if remoteErr == nil && remoteCustomer != nil {
+			return remoteCustomer, nil
+		}
+	}
+	return customer, err
 }
 
 func (s *InvoiceService) UpdateStatus(ctx context.Context, id uuid.UUID, newStatus domain.InvoiceStatus, notes string, performedBy string) error {
@@ -1281,6 +1340,10 @@ func (s *InvoiceService) sendInvoiceNotification(ctx context.Context, invoice *d
 	if invoice.ContactID != nil {
 		if contact, err := s.rmRepo.GetContact(ctx, *invoice.ContactID); err == nil && contact != nil && contact.Email != "" {
 			recipientEmail = contact.Email
+		} else if s.customerClient != nil {
+			if contact, err := s.customerClient.GetContact(ctx, *invoice.ContactID); err == nil && contact != nil && contact.Email != "" {
+				recipientEmail = contact.Email
+			}
 		}
 	}
 	if recipientEmail == "" && customer != nil && customer.Email != "" {
