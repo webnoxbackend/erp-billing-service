@@ -1335,24 +1335,42 @@ func (s *InvoiceService) getFSMDetails(ctx context.Context, invoice *domain.Invo
 }
 
 func (s *InvoiceService) sendInvoiceNotification(ctx context.Context, invoice *domain.Invoice, customer *domain.CustomerRM, org *domain.OrganizationRM) {
-	// Find recipient email
-	var recipientEmail string
+	var contactEmail string
 	if invoice.ContactID != nil {
 		if contact, err := s.rmRepo.GetContact(ctx, *invoice.ContactID); err == nil && contact != nil && contact.Email != "" {
-			recipientEmail = contact.Email
+			contactEmail = contact.Email
 		} else if s.customerClient != nil {
 			if contact, err := s.customerClient.GetContact(ctx, *invoice.ContactID); err == nil && contact != nil && contact.Email != "" {
-				recipientEmail = contact.Email
+				contactEmail = contact.Email
 			}
 		}
 	}
-	if recipientEmail == "" && customer != nil && customer.Email != "" {
-		recipientEmail = customer.Email
+
+	var customerEmail string
+	if customer != nil && customer.Email != "" {
+		customerEmail = customer.Email
 	}
-	if recipientEmail == "" && customer != nil {
+
+	var primaryContactEmail string
+	if customer != nil {
 		if contact, err := s.rmRepo.GetPrimaryContact(ctx, customer.ID); err == nil && contact != nil && contact.Email != "" {
-			recipientEmail = contact.Email
+			primaryContactEmail = contact.Email
 		}
+	}
+
+	// Determine recipient and CC list
+	var recipientEmail string
+	var ccEmails []string
+
+	if contactEmail != "" {
+		recipientEmail = contactEmail
+		if customerEmail != "" && strings.ToLower(customerEmail) != strings.ToLower(contactEmail) {
+			ccEmails = append(ccEmails, customerEmail)
+		}
+	} else if customerEmail != "" {
+		recipientEmail = customerEmail
+	} else if primaryContactEmail != "" {
+		recipientEmail = primaryContactEmail
 	}
 
 	if recipientEmail == "" {
@@ -1410,6 +1428,7 @@ func (s *InvoiceService) sendInvoiceNotification(ctx context.Context, invoice *d
 			"total_amount":   fmt.Sprintf("%.2f", invoice.TotalAmount),
 			"due_date":       invoice.DueDate.Format("2006-01-02"),
 		},
+		CC:            ccEmails,
 		SourceService: "billing-service",
 		ReferenceID:   invoice.ID.String(),
 		ReferenceType: "invoice",
@@ -1426,6 +1445,6 @@ func (s *InvoiceService) sendInvoiceNotification(ctx context.Context, invoice *d
 	if err != nil {
 		fmt.Printf("[ERROR] Failed to publish notification request for invoice %s: %v\n", invoice.ID, err)
 	} else {
-		fmt.Printf("[INFO] Published notification request for invoice %s to %s\n", invoice.ID, recipientEmail)
+		fmt.Printf("[INFO] Published notification request for invoice %s to %s with CC %v\n", invoice.ID, recipientEmail, ccEmails)
 	}
 }
