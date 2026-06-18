@@ -3,36 +3,32 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
+	"erp-billing-service/internal/domain"
+
+	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func main() {
-	dsn := "postgresql://billing_user:Billing@123@192.168.0.26:5441/billing_db"
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgresql://efsbillingdevdb:efsbillingdevdb@123@192.168.0.26:5467/efsbillingdevdb"
+	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	rows, err := db.Raw("SELECT column_name FROM information_schema.columns WHERE table_name = 'work_order_rms'").Rows()
+	fmt.Println("\nQuerying WorkOrderRM GORM model directly:")
+	var wo domain.WorkOrderRM
+	woID := uuid.MustParse("f470c748-62f4-4202-aafa-83ebbc1d6501")
+	err = db.Debug().First(&wo, "id = ?", woID).Error
 	if err != nil {
-		log.Fatal(err)
-	}
-	defer rows.Close()
-
-	fmt.Println("Columns in work_order_rms (billing_db):")
-	for rows.Next() {
-		var columnName string
-		rows.Scan(&columnName)
-		fmt.Println("-", columnName)
-	}
-
-	fmt.Println("\nRecent work orders in work_order_rms:")
-	var results []map[string]interface{}
-	db.Table("work_order_rms").Order("updated_at DESC").Limit(5).Find(&results)
-	for _, wo := range results {
-		fmt.Printf("WO ID: %v\n  Summary: %v\n  RequestID: %v\n  EstimateID: %v\n  ServiceCategoryID: %v\n\n",
-			wo["id"], wo["summary"], wo["request_id"], wo["estimate_id"], wo["service_category_id"])
+		fmt.Println("Error querying WorkOrderRM:", err)
+	} else {
+		fmt.Printf("SUCCESS! GORM Found WO ID: %s, Summary: %s, CustomerID: %v, OrgID: %s\n", wo.ID, wo.Summary, wo.CustomerID, wo.OrganizationID)
 	}
 }

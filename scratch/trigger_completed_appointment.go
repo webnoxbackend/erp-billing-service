@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"erp-billing-service/internal/domain"
@@ -22,13 +23,16 @@ func main() {
 		log.Println("No .env file found, relying on environment")
 	}
 
-	dsn := "postgresql://billing_user:Billing@123@192.168.0.26:5441/billing_db"
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgresql://efsbillingdevdb:efsbillingdevdb@123@192.168.0.26:5467/efsbillingdevdb"
+	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	woIDStr := "c858ae9a-aae2-415e-ad11-b9c8846de6d0"
+	woIDStr := "f470c748-62f4-4202-aafa-83ebbc1d6501"
 	woID := uuid.MustParse(woIDStr)
 
 	// 1. Delete existing invoices for this work order to allow regeneration
