@@ -155,6 +155,11 @@ func AutoMigrate(db *gorm.DB) error {
 		&domain.ServiceAppointmentRM{},
 		&domain.ServiceAppointmentResourceRM{},
 		&domain.UserReadOnly{},
+		&domain.Subscription{},
+		&domain.SubscriptionItem{},
+		&domain.SubscriptionUpgrade{},
+		&domain.BillingItemCatalog{},
+		&domain.SubscriptionAuditLog{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)
@@ -164,6 +169,48 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.Exec("ALTER TABLE IF EXISTS service_appointments_readonly DROP COLUMN IF EXISTS cancellation_notes, DROP COLUMN IF EXISTS termination_notes, DROP COLUMN IF EXISTS reschedule_notes").Error; err != nil {
 		log.Printf("Warning: failed to drop obsolete notes columns from service_appointments_readonly: %v", err)
 	}
+
+	// Seed default BillingItemCatalog
+	defaultCatalog := []domain.BillingItemCatalog{
+		{
+			Code:        "MODULE_EFS",
+			Name:        "Field Service Management Module",
+			Type:        "module",
+			BillingType: "per_unit",
+			UnitPrice:   500.00,
+			TaxRate:     18.00,
+			IsActive:    true,
+		},
+		{
+			Code:        "MODULE_CRM",
+			Name:        "CRM Module",
+			Type:        "module",
+			BillingType: "fixed",
+			UnitPrice:   2000.00,
+			TaxRate:     18.00,
+			IsActive:    true,
+		},
+		{
+			Code:        "MODULE_IMS",
+			Name:        "Inventory Management System Module",
+			Type:        "module",
+			BillingType: "fixed",
+			UnitPrice:   3000.00,
+			TaxRate:     18.00,
+			IsActive:    true,
+		},
+	}
+
+	for _, cat := range defaultCatalog {
+		var existing domain.BillingItemCatalog
+		if err := db.Where("code = ?", cat.Code).First(&existing).Error; err != nil {
+			// Not found, create it
+			if err := db.Create(&cat).Error; err != nil {
+				log.Printf("Warning: failed to seed catalog item %s: %v", cat.Code, err)
+			}
+		}
+	}
+
 
 	log.Println("Database migrations completed successfully")
 	return nil

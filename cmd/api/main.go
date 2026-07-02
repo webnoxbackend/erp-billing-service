@@ -14,6 +14,7 @@ import (
 	grpc_adapter "erp-billing-service/internal/adapters/outbound/grpc"
 	outbound_http "erp-billing-service/internal/adapters/outbound/http"
 	kafka_outbound "erp-billing-service/internal/adapters/outbound/kafka"
+	razorpay_outbound "erp-billing-service/internal/adapters/outbound/razorpay"
 	"erp-billing-service/internal/adapters/outbound/postgres"
 	"erp-billing-service/internal/application"
 	"erp-billing-service/internal/config"
@@ -56,7 +57,19 @@ func main() {
 	rmRepo := postgres.NewReadModelRepository(db, cfg.InventoryServiceHTTPURL)
 	salesOrderRepo := postgres.NewSalesOrderRepository(db)
 	salesReturnRepo := postgres.NewSalesReturnRepository(db)
+	subscriptionRepo := postgres.NewSubscriptionRepository(db)
 	eventPublisher := kafka_outbound.NewEventPublisher(producer)
+
+	// Initialize Razorpay Client
+	razorpayKeyID := os.Getenv("RAZORPAY_KEY_ID")
+	razorpayKeySecret := os.Getenv("RAZORPAY_KEY_SECRET")
+	if razorpayKeyID == "" {
+		razorpayKeyID = "rzp_test_mock_id"
+	}
+	if razorpayKeySecret == "" {
+		razorpayKeySecret = "mock_secret"
+	}
+	razorpayClient := razorpay_outbound.NewRazorpayClient(razorpayKeyID, razorpayKeySecret)
 
 	// 5.5. Initialize PDF Service
 	pdfStoragePath := os.Getenv("PDF_STORAGE_PATH")
@@ -100,6 +113,7 @@ func main() {
 	paymentService := application.NewPaymentService(paymentRepo, invoiceRepo, salesOrderRepo, rmRepo, auditRepo, eventPublisher)
 	salesOrderService := application.NewSalesOrderService(salesOrderRepo, invoiceRepo, rmRepo, eventPublisher, inventoryClient, customerClient)
 	salesReturnService := application.NewSalesReturnService(salesReturnRepo, salesOrderRepo, invoiceRepo, paymentRepo, rmRepo, eventPublisher, inventoryClient)
+	subscriptionService := application.NewSubscriptionService(subscriptionRepo, invoiceRepo, paymentRepo, rmRepo, eventPublisher, razorpayClient)
 
 	// 7. Initialize Kafka Consumers
 	eventHandler := kafka.NewEventHandler(db, invoiceService)
@@ -133,6 +147,8 @@ func main() {
 	rmHandler := billing_http.NewReadModelHandler(rmRepo)
 	estimateInvoiceHandler := billing_http.NewEstimateInvoiceHandler(invoiceService)
 	customerInvoiceHandler := billing_http.NewCustomerInvoiceHandler(invoiceService, paymentService)
+	subscriptionHandler := billing_http.NewSubscriptionHandler(subscriptionService)
+	razorpayWebhookHandler := billing_http.NewRazorpayWebhookHandler(subscriptionService, db, eventPublisher, invoiceRepo, paymentRepo)
 
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api/v1").Subrouter()
@@ -144,6 +160,16 @@ func main() {
 	api.HandleFunc("/customer/payments", customerInvoiceHandler.ListCustomerPayments).Methods("GET")
 	api.HandleFunc("/customer/payments", customerInvoiceHandler.RecordCustomerPayment).Methods("POST")
 	api.HandleFunc("/customer/invoices/{id}/pdf", customerInvoiceHandler.DownloadCustomerInvoicePDF).Methods("GET")
+
+	// Subscription Routes
+	api.HandleFunc("/billing/subscriptions/create", subscriptionHandler.CreateSubscription).Methods("POST")
+	api.HandleFunc("/billing/subscriptions/upgrade", subscriptionHandler.UpgradeSubscription).Methods("POST")
+	api.HandleFunc("/billing/subscriptions/downgrade", subscriptionHandler.DowngradeSubscription).Methods("POST")
+	api.HandleFunc("/billing/subscriptions/status", subscriptionHandler.GetStatus).Methods("GET")
+	api.HandleFunc("/billing/subscriptions/history", subscriptionHandler.GetHistory).Methods("GET")
+
+	// Razorpay Webhook Route
+	api.HandleFunc("/billing/webhooks/razorpay", razorpayWebhookHandler.HandleWebhook).Methods("POST")
 
 	// Invoice Routes
 	api.HandleFunc("/billing/invoices", invoiceHandler.CreateInvoice).Methods("POST")

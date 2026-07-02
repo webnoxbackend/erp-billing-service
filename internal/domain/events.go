@@ -185,3 +185,81 @@ type SalesReturnRefundedEvent struct {
 	PaymentID     string  `json:"payment_id"`
 }
 
+// ============================================================================
+// Subscription Events
+// ============================================================================
+
+type SubscriptionItemPayload struct {
+	ItemCode    string  `json:"item_code"`
+	Name        string  `json:"name"`
+	Type        string  `json:"type"`
+	BillingType string  `json:"billing_type"`
+	UnitPrice   float64 `json:"unit_price"`
+	Quantity    int     `json:"quantity"`
+	Amount      float64 `json:"amount"`
+	Status      string  `json:"status"`
+}
+
+type SubscriptionCreatedEvent struct {
+	SubscriptionID  string                    `json:"subscription_id"`
+	OrganizationID  string                    `json:"organization_id"`
+	RazorpaySubID   string                    `json:"razorpay_subscription_id,omitempty"`
+	Status          string                    `json:"status"`
+	RecurringAmount float64                   `json:"recurring_amount"`
+	TaxPercentage   float64                   `json:"tax_percentage"`
+	TotalAmount     float64                   `json:"total_amount"`
+	Currency        string                    `json:"currency"`
+	Items           []SubscriptionItemPayload `json:"items"`
+	Timestamp       time.Time                 `json:"timestamp"`
+}
+
+type SubscriptionActivatedEvent struct {
+	SubscriptionID     string                    `json:"subscription_id"`
+	OrganizationID     string                    `json:"organization_id"`
+	RazorpaySubID      string                    `json:"razorpay_subscription_id"`
+	Status             string                    `json:"status"`
+	CurrentPeriodStart time.Time                 `json:"current_period_start"`
+	CurrentPeriodEnd   time.Time                 `json:"current_period_end"`
+	RecurringAmount    float64                   `json:"recurring_amount"`
+	Items              []SubscriptionItemPayload `json:"items"`
+	Timestamp          time.Time                 `json:"timestamp"`
+}
+
+type SubscriptionUpgradedEvent struct {
+	SubscriptionID  string                    `json:"subscription_id"`
+	OrganizationID  string                    `json:"organization_id"`
+	ProratedAmount  float64                   `json:"prorated_amount"`
+	TaxAmount       float64                   `json:"tax_amount"`
+	TotalPaid       float64                   `json:"total_paid"`
+	RazorpayOrderID string                    `json:"razorpay_order_id"`
+	RecurringAmount float64                   `json:"recurring_amount"`
+	Items           []SubscriptionItemPayload `json:"items"`
+	Timestamp       time.Time                 `json:"timestamp"`
+}
+
+type SubscriptionDowngradedEvent struct {
+	SubscriptionID  string                    `json:"subscription_id"`
+	OrganizationID  string                    `json:"organization_id"`
+	RecurringAmount float64                   `json:"recurring_amount"`
+	Items           []SubscriptionItemPayload `json:"items"`
+	Timestamp       time.Time                 `json:"timestamp"`
+}
+
+type SubscriptionRenewedEvent struct {
+	SubscriptionID     string                    `json:"subscription_id"`
+	OrganizationID     string                    `json:"organization_id"`
+	RazorpaySubID      string                    `json:"razorpay_subscription_id"`
+	CurrentPeriodStart time.Time                 `json:"current_period_start"`
+	CurrentPeriodEnd   time.Time                 `json:"current_period_end"`
+	RecurringAmount    float64                   `json:"recurring_amount"`
+	Items              []SubscriptionItemPayload `json:"items"`
+	Timestamp          time.Time                 `json:"timestamp"`
+}
+
+type SubscriptionCancelledEvent struct {
+	SubscriptionID string    `json:"subscription_id"`
+	OrganizationID string    `json:"organization_id"`
+	Timestamp      time.Time `json:"timestamp"`
+}
+
+
