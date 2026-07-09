@@ -18,16 +18,18 @@ type RecordPaymentRequest struct {
 
 // PaymentResponse represents a payment response
 type PaymentResponse struct {
-	ID          string    `json:"id"`
-	InvoiceID   string    `json:"invoice_id"`
-	Amount      float64   `json:"amount"`
-	Method      string    `json:"method"`
-	Reference   string    `json:"reference"`
-	PaymentDate time.Time `json:"payment_date"`
-	Status      string    `json:"status"`
-	Notes       string    `json:"notes"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	InvoiceID     string    `json:"invoice_id"`
+	InvoiceNumber string    `json:"invoice_number,omitempty"`
+	CustomerName  string    `json:"customer_name,omitempty"`
+	Amount        float64   `json:"amount"`
+	Method        string    `json:"method"`
+	Reference     string    `json:"reference"`
+	PaymentDate   time.Time `json:"payment_date"`
+	Status        string    `json:"status"`
+	Notes         string    `json:"notes"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // VoidPaymentRequest represents a request to void a payment

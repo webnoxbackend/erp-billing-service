@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     tcs_amount DECIMAL(15, 2) DEFAULT 0,
     total_amount DECIMAL(15, 2) NOT NULL,
     invoice_id UUID,
+    service_category_id UUID,
+    part_category_id UUID,
     shipped_date TIMESTAMP,
     terms TEXT,
     notes TEXT,

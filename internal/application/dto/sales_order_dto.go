@@ -13,27 +13,31 @@ import (
 
 // CreateSalesOrderRequest represents a request to create a new sales order
 type CreateSalesOrderRequest struct {
-	OrganizationID uuid.UUID           `json:"organization_id" validate:"required"`
-	CustomerID     uuid.UUID           `json:"customer_id" validate:"required"`
-	ContactID      *uuid.UUID          `json:"contact_id,omitempty"`
-	OrderDate      time.Time           `json:"order_date" validate:"required"`
-	Items          []SalesOrderItemDTO `json:"items" validate:"required,min=1,dive"`
-	TDSAmount      float64             `json:"tds_amount"`
-	TCSAmount      float64             `json:"tcs_amount"`
-	Terms          string              `json:"terms"`
-	Notes          string              `json:"notes"`
+	OrganizationID    uuid.UUID           `json:"organization_id" validate:"required"`
+	CustomerID        uuid.UUID           `json:"customer_id" validate:"required"`
+	ContactID         *uuid.UUID          `json:"contact_id,omitempty"`
+	ServiceCategoryID *uuid.UUID          `json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID          `json:"part_category_id,omitempty"`
+	OrderDate         time.Time           `json:"order_date" validate:"required"`
+	Items             []SalesOrderItemDTO `json:"items" validate:"required,min=1,dive"`
+	TDSAmount         float64             `json:"tds_amount"`
+	TCSAmount         float64             `json:"tcs_amount"`
+	Terms             string              `json:"terms"`
+	Notes             string              `json:"notes"`
 }
 
 // UpdateSalesOrderRequest represents a request to update a sales order
 type UpdateSalesOrderRequest struct {
-	CustomerID *uuid.UUID          `json:"customer_id,omitempty"`
-	ContactID  *uuid.UUID          `json:"contact_id,omitempty"`
-	OrderDate  *time.Time          `json:"order_date,omitempty"`
-	Items      []SalesOrderItemDTO `json:"items,omitempty"`
-	TDSAmount  *float64            `json:"tds_amount,omitempty"`
-	TCSAmount  *float64            `json:"tcs_amount,omitempty"`
-	Terms      *string             `json:"terms,omitempty"`
-	Notes      *string             `json:"notes,omitempty"`
+	CustomerID        *uuid.UUID          `json:"customer_id,omitempty"`
+	ContactID         *uuid.UUID          `json:"contact_id,omitempty"`
+	ServiceCategoryID *uuid.UUID          `json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID          `json:"part_category_id,omitempty"`
+	OrderDate         *time.Time          `json:"order_date,omitempty"`
+	Items             []SalesOrderItemDTO `json:"items,omitempty"`
+	TDSAmount         *float64            `json:"tds_amount,omitempty"`
+	TCSAmount         *float64            `json:"tcs_amount,omitempty"`
+	Terms             *string             `json:"terms,omitempty"`
+	Notes             *string             `json:"notes,omitempty"`
 }
 
 // SalesOrderItemDTO represents a line item in a sales order
@@ -67,9 +71,11 @@ type SalesOrderResponse struct {
 	TaxTotal       float64             `json:"tax_total"`
 	TDSAmount      float64             `json:"tds_amount"`
 	TCSAmount      float64             `json:"tcs_amount"`
-	TotalAmount    float64             `json:"total_amount"`
-	InvoiceID      *uuid.UUID          `json:"invoice_id,omitempty"`
-	ShippedDate    *time.Time          `json:"shipped_date,omitempty"`
+	TotalAmount       float64             `json:"total_amount"`
+	InvoiceID         *uuid.UUID          `json:"invoice_id,omitempty"`
+	ServiceCategoryID *uuid.UUID          `json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID          `json:"part_category_id,omitempty"`
+	ShippedDate       *time.Time          `json:"shipped_date,omitempty"`
 	Terms          string              `json:"terms"`
 	Notes          string              `json:"notes"`
 	Items          []SalesOrderItemDTO `json:"items"`

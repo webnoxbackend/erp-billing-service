@@ -3,10 +3,12 @@ package application
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
+	"erp-billing-service/internal/ports/outbound"
 	"erp-billing-service/internal/ports/repositories"
 
 	shared_events "github.com/efs/shared-events"
@@ -21,6 +23,7 @@ type PaymentService struct {
 	rmRepo         domain.ReadModelRepository
 	auditRepo      domain.AuditLogRepository
 	eventPublisher domain.EventPublisher
+	customerClient outbound.CustomerClient
 }
 
 // NewPaymentService creates a new payment service
@@ -31,6 +34,7 @@ func NewPaymentService(
 	rmRepo domain.ReadModelRepository,
 	auditRepo domain.AuditLogRepository,
 	eventPublisher domain.EventPublisher,
+	customerClient outbound.CustomerClient,
 ) *PaymentService {
 	return &PaymentService{
 		paymentRepo:    paymentRepo,
@@ -39,6 +43,7 @@ func NewPaymentService(
 		rmRepo:         rmRepo,
 		auditRepo:      auditRepo,
 		eventPublisher: eventPublisher,
+		customerClient: customerClient,
 	}
 }
 
@@ -433,8 +438,20 @@ func (s *PaymentService) GetPayment(ctx context.Context, paymentID uuid.UUID) (*
 
 // Helper methods
 
+func (s *PaymentService) getCustomer(ctx context.Context, id uuid.UUID) (*domain.CustomerRM, error) {
+	customer, err := s.rmRepo.GetCustomer(ctx, id)
+	if (err != nil || customer == nil || customer.DisplayName == "") && s.customerClient != nil {
+		log.Printf("[INFO] Customer %s missing or invalid in ReadModel, fetching from Customer Service\n", id)
+		remoteCustomer, remoteErr := s.customerClient.GetCustomer(ctx, id)
+		if remoteErr == nil && remoteCustomer != nil {
+			return remoteCustomer, nil
+		}
+	}
+	return customer, err
+}
+
 func (s *PaymentService) mapToResponse(ctx context.Context, payment *domain.Payment) *dto.PaymentResponse {
-	return &dto.PaymentResponse{
+	resp := &dto.PaymentResponse{
 		ID:          payment.ID.String(),
 		InvoiceID:   payment.InvoiceID.String(),
 		Amount:      payment.Amount,
@@ -446,6 +463,32 @@ func (s *PaymentService) mapToResponse(ctx context.Context, payment *domain.Paym
 		CreatedAt:   ConvertToOrgTZValue(ctx, payment.CreatedAt, payment.OrganizationID, s.rmRepo),
 		UpdatedAt:   ConvertToOrgTZValue(ctx, payment.UpdatedAt, payment.OrganizationID, s.rmRepo),
 	}
+
+	// Fetch related invoice and customer info to populate InvoiceNumber and CustomerName
+	invoice, err := s.invoiceRepo.GetByID(ctx, payment.InvoiceID)
+	if err != nil {
+		log.Printf("[PaymentService.mapToResponse] Error fetching invoice %s: %v", payment.InvoiceID, err)
+	} else if invoice == nil {
+		log.Printf("[PaymentService.mapToResponse] Invoice %s is nil", payment.InvoiceID)
+	} else {
+		if invoice.InvoiceNumber != nil {
+			resp.InvoiceNumber = *invoice.InvoiceNumber
+		}
+		customer, err := s.getCustomer(ctx, invoice.CustomerID)
+		if err != nil {
+			log.Printf("[PaymentService.mapToResponse] Error fetching customer %s: %v", invoice.CustomerID, err)
+		} else if customer == nil {
+			log.Printf("[PaymentService.mapToResponse] Customer %s is nil", invoice.CustomerID)
+		} else {
+			if customer.DisplayName != "" {
+				resp.CustomerName = customer.DisplayName
+			} else {
+				resp.CustomerName = customer.CompanyName
+			}
+		}
+	}
+
+	return resp
 }
 
 func (s *PaymentService) publishPaymentReceived(payment *domain.Payment, invoice *domain.Invoice) {

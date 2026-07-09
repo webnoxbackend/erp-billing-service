@@ -13,6 +13,7 @@ import (
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
 	"erp-billing-service/internal/ports/outbound"
+	"erp-billing-service/internal/ports/repositories"
 
 	shared_events "github.com/efs/shared-events"
 	"github.com/google/uuid"
@@ -29,6 +30,7 @@ type InvoiceService struct {
 	s3Service       *S3Service  // Added for S3 integration
 	inventoryClient outbound.InventoryClient
 	customerClient  outbound.CustomerClient
+	salesOrderRepo  repositories.SalesOrderRepository
 }
 
 func NewInvoiceService(
@@ -40,6 +42,7 @@ func NewInvoiceService(
 	s3Service *S3Service,
 	inventoryClient outbound.InventoryClient,
 	customerClient outbound.CustomerClient,
+	salesOrderRepo repositories.SalesOrderRepository,
 ) *InvoiceService {
 	return &InvoiceService{
 		invoiceRepo:     invoiceRepo,
@@ -50,6 +53,7 @@ func NewInvoiceService(
 		s3Service:       s3Service,
 		inventoryClient: inventoryClient,
 		customerClient:  customerClient,
+		salesOrderRepo:  salesOrderRepo,
 	}
 }
 
@@ -292,6 +296,37 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 
 	if err := s.invoiceRepo.Create(ctx, invoice); err != nil {
 		return nil, err
+	}
+
+	// Update originating sales order if invoice was created from a sales order
+	if req.SalesOrderID != nil {
+		salesOrder, err := s.salesOrderRepo.FindByID(*req.SalesOrderID)
+		if err == nil && salesOrder != nil {
+			if salesOrder.CanCreateInvoice() {
+				salesOrder.InvoiceID = &invoice.ID
+				salesOrder.Status = domain.SalesOrderStatusInvoiced
+				salesOrder.UpdatedAt = time.Now()
+				if err := s.salesOrderRepo.Update(salesOrder); err != nil {
+					log.Printf("[CreateInvoice] failed to update sales order %s: %v", salesOrder.ID, err)
+				} else {
+					log.Printf("[CreateInvoice] updated sales order %s status to Invoiced", salesOrder.ID)
+					
+					// Publish sales_order.invoiced event to keep inventory/other services in sync
+					orderMeta := shared_events.NewEventMetadata(
+						shared_events.EventType("sales_order.invoiced"),
+						shared_events.AggregateType("sales_order"),
+						salesOrder.ID.String(),
+					)
+					orderEvent := domain.SalesOrderInvoicedEvent{
+						SalesOrderID: salesOrder.ID.String(),
+						InvoiceID:    invoice.ID.String(),
+					}
+					s.eventPublisher.Publish(ctx, orderMeta, orderEvent)
+				}
+			}
+		} else {
+			log.Printf("[CreateInvoice] failed to find originating sales order %s: %v", *req.SalesOrderID, err)
+		}
 	}
 
 	// Update Stock (Decrease) if applicable - DISABLED

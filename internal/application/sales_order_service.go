@@ -50,13 +50,14 @@ func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (
 	if s.inventoryClient != nil {
 		stockItems := make([]outbound.StockCheckItem, 0)
 		for _, itemDTO := range req.Items {
-			// Only check stock for GOODS items, assuming 'goods' type or if type is empty default to goods?
-			// The ItemType isn't strictly defined here as enum, but let's assume we check everything for now or filter.
-			// Ideally we check everything.
-			stockItems = append(stockItems, outbound.StockCheckItem{
-				ItemID:   itemDTO.ItemID.String(),
-				Quantity: int32(itemDTO.Quantity),
-			})
+			// Only check stock for goods, product, or part items (case-insensitive)
+			itemTypeLower := strings.ToLower(itemDTO.ItemType)
+			if itemTypeLower == "goods" || itemTypeLower == "product" || itemTypeLower == "part" || itemTypeLower == "" {
+				stockItems = append(stockItems, outbound.StockCheckItem{
+					ItemID:   itemDTO.ItemID.String(),
+					Quantity: int32(itemDTO.Quantity),
+				})
+			}
 		}
 
 		if len(stockItems) > 0 {
@@ -76,19 +77,24 @@ func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (
 	}
 
 	// Create sales order entity
+	orderID := uuid.New()
+	draftNum := fmt.Sprintf("DRAFT-%s", orderID.String()[:8])
 	salesOrder := &domain.SalesOrder{
-		ID:             uuid.New(),
-		OrganizationID: req.OrganizationID,
-		CustomerID:     req.CustomerID,
-		ContactID:      req.ContactID,
-		OrderDate:      req.OrderDate,
-		Status:         domain.SalesOrderStatusDraft,
-		TDSAmount:      req.TDSAmount,
-		TCSAmount:      req.TCSAmount,
-		Terms:          req.Terms,
-		Notes:          req.Notes,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		ID:                orderID,
+		OrganizationID:    req.OrganizationID,
+		CustomerID:        req.CustomerID,
+		ContactID:         req.ContactID,
+		OrderNumber:       &draftNum,
+		ServiceCategoryID: req.ServiceCategoryID,
+		PartCategoryID:    req.PartCategoryID,
+		OrderDate:         req.OrderDate,
+		Status:            domain.SalesOrderStatusDraft,
+		TDSAmount:         req.TDSAmount,
+		TCSAmount:         req.TCSAmount,
+		Terms:             req.Terms,
+		Notes:             req.Notes,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
 	}
 
 	// Add items
@@ -165,6 +171,12 @@ func (s *SalesOrderService) UpdateSalesOrder(id uuid.UUID, req *dto.UpdateSalesO
 	}
 	if req.ContactID != nil {
 		salesOrder.ContactID = req.ContactID
+	}
+	if req.ServiceCategoryID != nil {
+		salesOrder.ServiceCategoryID = req.ServiceCategoryID
+	}
+	if req.PartCategoryID != nil {
+		salesOrder.PartCategoryID = req.PartCategoryID
 	}
 	if req.OrderDate != nil {
 		salesOrder.OrderDate = *req.OrderDate
@@ -711,8 +723,10 @@ func (s *SalesOrderService) toSalesOrderResponse(ctx context.Context, salesOrder
 		TDSAmount:      salesOrder.TDSAmount,
 		TCSAmount:      salesOrder.TCSAmount,
 		TotalAmount:    salesOrder.TotalAmount,
-		InvoiceID:      salesOrder.InvoiceID,
-		ShippedDate:    ConvertToOrgTZ(ctx, salesOrder.ShippedDate, salesOrder.OrganizationID, s.rmRepo),
+		InvoiceID:         salesOrder.InvoiceID,
+		ServiceCategoryID: salesOrder.ServiceCategoryID,
+		PartCategoryID:    salesOrder.PartCategoryID,
+		ShippedDate:       ConvertToOrgTZ(ctx, salesOrder.ShippedDate, salesOrder.OrganizationID, s.rmRepo),
 		Terms:          salesOrder.Terms,
 		Notes:          salesOrder.Notes,
 		Items:          items,

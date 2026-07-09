@@ -41,8 +41,10 @@ type SalesOrder struct {
 	TotalAmount   float64 `gorm:"type:decimal(15,2)" json:"total_amount"`
 
 	// References
-	InvoiceID   *uuid.UUID `gorm:"type:uuid;index" json:"invoice_id"`
-	ShippedDate *time.Time `json:"shipped_date,omitempty"`
+	InvoiceID         *uuid.UUID `gorm:"type:uuid;index" json:"invoice_id"`
+	ServiceCategoryID *uuid.UUID `gorm:"type:uuid;index" json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID `gorm:"type:uuid;index" json:"part_category_id,omitempty"`
+	ShippedDate       *time.Time `json:"shipped_date,omitempty"`
 
 	// Additional details
 	Terms string `gorm:"type:text" json:"terms"`
