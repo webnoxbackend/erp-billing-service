@@ -44,6 +44,7 @@ type ReadModelRepository interface {
 	GetTechnicianNamesForAppointment(ctx context.Context, appointmentID uuid.UUID) ([]string, error)
 	GetTechniciansForAppointment(ctx context.Context, appointmentID uuid.UUID) ([]UserReadOnly, error)
 	GetCustomerIDsByEmailAndOrg(ctx context.Context, orgID uuid.UUID, email string) ([]uuid.UUID, error)
+	GetAddress(ctx context.Context, id uuid.UUID) (*AddressReadOnly, error)
 }
 
 type AuditLogRepository interface {

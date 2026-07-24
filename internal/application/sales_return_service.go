@@ -54,10 +54,9 @@ func (s *SalesReturnService) CreateSalesReturn(req *dto.CreateSalesReturnRequest
 		return nil, fmt.Errorf("failed to find sales order: %w", err)
 	}
 
-	// Validate order can be returned (must be paid and shipped)
+	// Validate order can be returned (must be delivered)
 	if !salesOrder.CanReturn() {
-		return nil, fmt.Errorf("sales order must be paid and shipped to create a return (current status: %s, shipped: %v)",
-			salesOrder.Status, salesOrder.ShippedDate != nil)
+		return nil, fmt.Errorf("sales order must be delivered to create a return (current status: %s)", salesOrder.Status)
 	}
 
 	// Create sales return entity
@@ -93,8 +92,24 @@ func (s *SalesReturnService) CreateSalesReturn(req *dto.CreateSalesReturnRequest
 	// Calculate totals
 	salesReturn.CalculateTotals()
 
-	// Validate return quantities
-	if err := salesReturn.ValidateReturnQuantity(salesOrder.Items); err != nil {
+	// Retrieve existing sales returns for this sales order to account for previous returns
+	existingReturns, _ := s.salesReturnRepo.FindBySalesOrderID(req.SalesOrderID)
+	returnedMap := make(map[uuid.UUID]float64)
+	for _, ret := range existingReturns {
+		for _, item := range ret.Items {
+			returnedMap[item.SalesOrderItemID] += item.ReturnedQuantity
+		}
+	}
+
+	remainingItems := make([]domain.SalesOrderItem, len(salesOrder.Items))
+	for i, item := range salesOrder.Items {
+		remainingItems[i] = item
+		alreadyReturned := returnedMap[item.ID]
+		remainingItems[i].Quantity = item.Quantity - alreadyReturned
+	}
+
+	// Validate return quantities against remaining returnable quantities
+	if err := salesReturn.ValidateReturnQuantity(remainingItems); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 

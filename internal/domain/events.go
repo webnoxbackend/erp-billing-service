@@ -154,6 +154,12 @@ type SalesOrderShippedEvent struct {
 	ShippedDate  time.Time `json:"shipped_date"`
 }
 
+// SalesOrderDeliveredEvent represents a sales order being delivered
+type SalesOrderDeliveredEvent struct {
+	SalesOrderID  string    `json:"sales_order_id"`
+	DeliveredDate time.Time `json:"delivered_date"`
+}
+
 // SalesOrderCancelledEvent represents a sales order cancellation
 type SalesOrderCancelledEvent struct {
 	SalesOrderID string `json:"sales_order_id"`

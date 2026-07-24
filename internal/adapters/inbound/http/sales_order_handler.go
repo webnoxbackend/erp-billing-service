@@ -245,6 +245,37 @@ func (h *SalesOrderHandler) MarkAsShipped(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(order)
 }
 
+// MarkAsDelivered handles POST /api/v1/sales-orders/:id/deliver
+func (h *SalesOrderHandler) MarkAsDelivered(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := uuid.Parse(vars["id"])
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid sales order ID"})
+		return
+	}
+
+	var req dto.MarkAsDeliveredRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	order, err := h.service.MarkAsDelivered(id, &req)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(order)
+}
+
 // CancelSalesOrder handles DELETE /api/v1/sales-orders/:id
 func (h *SalesOrderHandler) CancelSalesOrder(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)

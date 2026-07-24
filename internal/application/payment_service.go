@@ -344,6 +344,7 @@ func (s *PaymentService) mapInvoiceToResponse(ctx context.Context, inv *domain.I
 		PaymentTerms:    inv.PaymentTerms,
 		Currency:        inv.Currency,
 		ServiceCategoryID: inv.ServiceCategoryID,
+		PartCategoryID:    inv.PartCategoryID,
 		OwnerID:         inv.OwnerID,
 		CustomerID:        inv.CustomerID,
 		ContactID:         inv.ContactID,
@@ -414,6 +415,7 @@ func (s *PaymentService) mapInvoiceToResponse(ctx context.Context, inv *domain.I
 				Tax:               item.Tax,
 				Total:             item.Total,
 				ServiceCategoryID: item.ServiceCategoryID,
+				PartCategoryID:    item.PartCategoryID,
 			}
 			res.Items = append(res.Items, itemResp)
 		}

@@ -19,6 +19,7 @@ type CreateInvoiceFromEstimateRequest struct {
 	BillingAddressID  *uuid.UUID `json:"billing_address_id,omitempty"`
 	ShippingAddressID *uuid.UUID `json:"shipping_address_id,omitempty"`
 	ServiceCategoryID *uuid.UUID `json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID `json:"part_category_id,omitempty"`
 	
 	// Totals from estimate
 	SubTotal       float64    `json:"sub_total"`

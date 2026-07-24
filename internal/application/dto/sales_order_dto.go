@@ -18,10 +18,20 @@ type CreateSalesOrderRequest struct {
 	ContactID         *uuid.UUID          `json:"contact_id,omitempty"`
 	ServiceCategoryID *uuid.UUID          `json:"service_category_id,omitempty"`
 	PartCategoryID    *uuid.UUID          `json:"part_category_id,omitempty"`
+	BillingAddressID  *uuid.UUID          `json:"billing_address_id,omitempty"`
+	ShippingAddressID *uuid.UUID          `json:"shipping_address_id,omitempty"`
+	ServiceAddressID  *uuid.UUID          `json:"service_address_id,omitempty"`
+	Subject           string              `json:"subject"`
 	OrderDate         time.Time           `json:"order_date" validate:"required"`
+	DueDate           time.Time           `json:"due_date"`
 	Items             []SalesOrderItemDTO `json:"items" validate:"required,min=1,dive"`
+	TDSPercentage     float64             `json:"tds_percentage"`
 	TDSAmount         float64             `json:"tds_amount"`
+	TCSPercentage     float64             `json:"tcs_percentage"`
 	TCSAmount         float64             `json:"tcs_amount"`
+	Adjustment        float64             `json:"adjustment"`
+	ExciseDuty        float64             `json:"excise_duty"`
+	SalesCommission   float64             `json:"sales_commission"`
 	Terms             string              `json:"terms"`
 	Notes             string              `json:"notes"`
 }
@@ -32,10 +42,20 @@ type UpdateSalesOrderRequest struct {
 	ContactID         *uuid.UUID          `json:"contact_id,omitempty"`
 	ServiceCategoryID *uuid.UUID          `json:"service_category_id,omitempty"`
 	PartCategoryID    *uuid.UUID          `json:"part_category_id,omitempty"`
+	BillingAddressID  *uuid.UUID          `json:"billing_address_id,omitempty"`
+	ShippingAddressID *uuid.UUID          `json:"shipping_address_id,omitempty"`
+	ServiceAddressID  *uuid.UUID          `json:"service_address_id,omitempty"`
+	Subject           *string             `json:"subject,omitempty"`
 	OrderDate         *time.Time          `json:"order_date,omitempty"`
+	DueDate           *time.Time          `json:"due_date,omitempty"`
 	Items             []SalesOrderItemDTO `json:"items,omitempty"`
+	TDSPercentage     *float64            `json:"tds_percentage,omitempty"`
 	TDSAmount         *float64            `json:"tds_amount,omitempty"`
+	TCSPercentage     *float64            `json:"tcs_percentage,omitempty"`
 	TCSAmount         *float64            `json:"tcs_amount,omitempty"`
+	Adjustment        *float64            `json:"adjustment,omitempty"`
+	ExciseDuty        *float64            `json:"excise_duty,omitempty"`
+	SalesCommission   *float64            `json:"sales_commission,omitempty"`
 	Terms             *string             `json:"terms,omitempty"`
 	Notes             *string             `json:"notes,omitempty"`
 }
@@ -75,7 +95,12 @@ type SalesOrderResponse struct {
 	InvoiceID         *uuid.UUID          `json:"invoice_id,omitempty"`
 	ServiceCategoryID *uuid.UUID          `json:"service_category_id,omitempty"`
 	PartCategoryID    *uuid.UUID          `json:"part_category_id,omitempty"`
+	BillingAddressID  *uuid.UUID          `json:"billing_address_id,omitempty"`
+	ShippingAddressID *uuid.UUID          `json:"shipping_address_id,omitempty"`
+	ServiceAddressID  *uuid.UUID          `json:"service_address_id,omitempty"`
 	ShippedDate       *time.Time          `json:"shipped_date,omitempty"`
+	DeliveredDate     *time.Time          `json:"delivered_date,omitempty"`
+	DueDate           *time.Time          `json:"due_date,omitempty"`
 	Terms          string              `json:"terms"`
 	Notes          string              `json:"notes"`
 	Items          []SalesOrderItemDTO `json:"items"`
@@ -99,6 +124,8 @@ type SalesOrderResponse struct {
 	TDSPercentage   float64 `json:"tds_percentage,omitempty"`
 	TCSPercentage   float64 `json:"tcs_percentage,omitempty"`
 	Adjustment      float64 `json:"adjustment,omitempty"`
+	ExciseDuty      float64 `json:"excise_duty"`
+	SalesCommission float64 `json:"sales_commission"`
 }
 
 // SalesOrderFilters represents filters for listing sales orders
@@ -116,6 +143,12 @@ type SalesOrderFilters struct {
 type MarkAsShippedRequest struct {
 	ShippedDate time.Time `json:"shipped_date" validate:"required"`
 	Notes       string    `json:"notes"`
+}
+
+// MarkAsDeliveredRequest represents a request to mark an order as delivered
+type MarkAsDeliveredRequest struct {
+	DeliveredDate time.Time `json:"delivered_date" validate:"required"`
+	Notes         string    `json:"notes"`
 }
 
 // ============================================================================

@@ -87,10 +87,20 @@ func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (
 		OrderNumber:       &draftNum,
 		ServiceCategoryID: req.ServiceCategoryID,
 		PartCategoryID:    req.PartCategoryID,
+		Subject:           req.Subject,
 		OrderDate:         req.OrderDate,
+		DueDate:           &req.DueDate,
+		BillingAddressID:  req.BillingAddressID,
+		ShippingAddressID: req.ShippingAddressID,
+		ServiceAddressID:  req.ServiceAddressID,
 		Status:            domain.SalesOrderStatusDraft,
+		TDSPercentage:     req.TDSPercentage,
 		TDSAmount:         req.TDSAmount,
+		TCSPercentage:     req.TCSPercentage,
 		TCSAmount:         req.TCSAmount,
+		Adjustment:        req.Adjustment,
+		ExciseDuty:        req.ExciseDuty,
+		SalesCommission:   req.SalesCommission,
 		Terms:             req.Terms,
 		Notes:             req.Notes,
 		CreatedAt:         time.Now(),
@@ -178,14 +188,44 @@ func (s *SalesOrderService) UpdateSalesOrder(id uuid.UUID, req *dto.UpdateSalesO
 	if req.PartCategoryID != nil {
 		salesOrder.PartCategoryID = req.PartCategoryID
 	}
+	if req.BillingAddressID != nil {
+		salesOrder.BillingAddressID = req.BillingAddressID
+	}
+	if req.ShippingAddressID != nil {
+		salesOrder.ShippingAddressID = req.ShippingAddressID
+	}
+	if req.ServiceAddressID != nil {
+		salesOrder.ServiceAddressID = req.ServiceAddressID
+	}
 	if req.OrderDate != nil {
 		salesOrder.OrderDate = *req.OrderDate
+	}
+	if req.DueDate != nil {
+		salesOrder.DueDate = req.DueDate
+	}
+	if req.Subject != nil {
+		salesOrder.Subject = *req.Subject
+	}
+	if req.TDSPercentage != nil {
+		salesOrder.TDSPercentage = *req.TDSPercentage
 	}
 	if req.TDSAmount != nil {
 		salesOrder.TDSAmount = *req.TDSAmount
 	}
+	if req.TCSPercentage != nil {
+		salesOrder.TCSPercentage = *req.TCSPercentage
+	}
 	if req.TCSAmount != nil {
 		salesOrder.TCSAmount = *req.TCSAmount
+	}
+	if req.Adjustment != nil {
+		salesOrder.Adjustment = *req.Adjustment
+	}
+	if req.ExciseDuty != nil {
+		salesOrder.ExciseDuty = *req.ExciseDuty
+	}
+	if req.SalesCommission != nil {
+		salesOrder.SalesCommission = *req.SalesCommission
 	}
 	if req.Terms != nil {
 		salesOrder.Terms = *req.Terms
@@ -332,10 +372,20 @@ func (s *SalesOrderService) CreateInvoiceFromOrder(orderID uuid.UUID) (*dto.Invo
 	var billingStreet, billingCity, billingState, billingCode, billingCountry string
 	var shippingStreet, shippingCity, shippingState, shippingCode, shippingCountry string
 
+	billingAddressID = salesOrder.BillingAddressID
+	shippingAddressID = salesOrder.ShippingAddressID
+	serviceAddressID = salesOrder.ServiceAddressID
+
 	if customer, err := s.rmRepo.GetCustomer(context.Background(), salesOrder.CustomerID); err == nil && customer != nil {
-		billingAddressID = customer.BillingAddressID
-		shippingAddressID = customer.ShippingAddressID
-		serviceAddressID = customer.ServiceAddressID
+		if billingAddressID == nil {
+			billingAddressID = customer.BillingAddressID
+		}
+		if shippingAddressID == nil {
+			shippingAddressID = customer.ShippingAddressID
+		}
+		if serviceAddressID == nil {
+			serviceAddressID = customer.ServiceAddressID
+		}
 		billingStreet = customer.BillingStreet
 		billingCity = customer.BillingCity
 		billingState = customer.BillingState
@@ -348,13 +398,47 @@ func (s *SalesOrderService) CreateInvoiceFromOrder(orderID uuid.UUID) (*dto.Invo
 		shippingCountry = customer.ShippingCountry
 	}
 
+	if billingAddressID != nil {
+		if addr, err := s.rmRepo.GetAddress(context.Background(), *billingAddressID); err == nil && addr != nil {
+			billingStreet = addr.Street1
+			if addr.Street2 != "" {
+				billingStreet = addr.Street1 + ", " + addr.Street2
+			}
+			billingCity = addr.City
+			billingState = addr.State
+			billingCode = addr.PostalCode
+			billingCountry = addr.Country
+		}
+	}
+	if shippingAddressID != nil {
+		if addr, err := s.rmRepo.GetAddress(context.Background(), *shippingAddressID); err == nil && addr != nil {
+			shippingStreet = addr.Street1
+			if addr.Street2 != "" {
+				shippingStreet = addr.Street1 + ", " + addr.Street2
+			}
+			shippingCity = addr.City
+			shippingState = addr.State
+			shippingCode = addr.PostalCode
+			shippingCountry = addr.Country
+		}
+	}
+
 	// Create invoice entity
+	invoiceSubject := salesOrder.Subject
+	if invoiceSubject == "" {
+		if salesOrder.OrderNumber != nil {
+			invoiceSubject = fmt.Sprintf("Sales Order %s", *salesOrder.OrderNumber)
+		} else {
+			invoiceSubject = fmt.Sprintf("Sales Order %s", salesOrder.ID.String()[:8])
+		}
+	}
+
 	invoice := &domain.Invoice{
 		ID:             uuid.New(),
 		OrganizationID: salesOrder.OrganizationID,
 		CustomerID:     salesOrder.CustomerID,
 		ContactID:      salesOrder.ContactID,
-		Subject:        fmt.Sprintf("Invoice for Sales Order %s", *salesOrder.OrderNumber),
+		Subject:        invoiceSubject,
 		SourceSystem:   domain.SourceSystemInventory,
 		SalesOrderID:   &salesOrder.ID,
 		InvoiceDate:    time.Now(),
@@ -367,8 +451,13 @@ func (s *SalesOrderService) CreateInvoiceFromOrder(orderID uuid.UUID) (*dto.Invo
 		TCSAmount:      salesOrder.TCSAmount,
 		TotalAmount:    salesOrder.TotalAmount,
 		BalanceAmount:  salesOrder.TotalAmount,
-		Terms:          salesOrder.Terms,
-		Notes:          salesOrder.Notes,
+		Adjustment:      salesOrder.Adjustment,
+		ExciseDuty:      salesOrder.ExciseDuty,
+		SalesCommission: salesOrder.SalesCommission,
+		Terms:             salesOrder.Terms,
+		Notes:             salesOrder.Notes,
+		ServiceCategoryID: salesOrder.ServiceCategoryID,
+		PartCategoryID:    salesOrder.PartCategoryID,
 		BillingAddressID:  billingAddressID,
 		ShippingAddressID: shippingAddressID,
 		ServiceAddressID:  serviceAddressID,
@@ -406,9 +495,11 @@ func (s *SalesOrderService) CreateInvoiceFromOrder(orderID uuid.UUID) (*dto.Invo
 			Discount:    orderItem.Discount,
 			Tax:         orderItem.Tax,
 			Total:       orderItem.Total,
-			Metadata:    orderItem.Metadata,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			Metadata:          orderItem.Metadata,
+			ServiceCategoryID: salesOrder.ServiceCategoryID,
+			PartCategoryID:    salesOrder.PartCategoryID,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
 		}
 		invoice.Items = append(invoice.Items, invoiceItem)
 	}
@@ -470,9 +561,14 @@ func (s *SalesOrderService) CreateInvoiceFromOrder(orderID uuid.UUID) (*dto.Invo
 		PaidAmount:    invoice.PaidAmount,
 		BalanceAmount: invoice.BalanceAmount,
 		CustomerID:    invoice.CustomerID,
-		ContactID:     invoice.ContactID,
-		InvoiceDate:   invoice.InvoiceDate,
-		DueDate:       invoice.DueDate,
+		ContactID:         invoice.ContactID,
+		ServiceCategoryID: invoice.ServiceCategoryID,
+		PartCategoryID:    invoice.PartCategoryID,
+		Adjustment:        invoice.Adjustment,
+		ExciseDuty:        invoice.ExciseDuty,
+		SalesCommission:   invoice.SalesCommission,
+		InvoiceDate:       invoice.InvoiceDate,
+		DueDate:           invoice.DueDate,
 	}, nil
 }
 
@@ -511,6 +607,47 @@ func (s *SalesOrderService) MarkAsShipped(id uuid.UUID, req *dto.MarkAsShippedRe
 	event := domain.SalesOrderShippedEvent{
 		SalesOrderID: salesOrder.ID.String(),
 		ShippedDate:  req.ShippedDate,
+	}
+	s.eventPublisher.Publish(context.Background(), metadata, event)
+
+	return s.toSalesOrderResponse(context.Background(), salesOrder), nil
+}
+
+// MarkAsDelivered marks a sales order as delivered
+func (s *SalesOrderService) MarkAsDelivered(id uuid.UUID, req *dto.MarkAsDeliveredRequest) (*dto.SalesOrderResponse, error) {
+	// Retrieve order
+	salesOrder, err := s.salesOrderRepo.FindByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find sales order: %w", err)
+	}
+
+	// Check if can deliver
+	if !salesOrder.CanDeliver() {
+		return nil, fmt.Errorf("cannot mark sales order as delivered in %s status or already delivered", salesOrder.Status)
+	}
+
+	// Update status
+	if err := salesOrder.CanTransitionTo(domain.SalesOrderStatusDelivered); err != nil {
+		return nil, err
+	}
+	salesOrder.Status = domain.SalesOrderStatusDelivered
+	salesOrder.DeliveredDate = &req.DeliveredDate
+	salesOrder.UpdatedAt = time.Now()
+
+	// Save
+	if err := s.salesOrderRepo.Update(salesOrder); err != nil {
+		return nil, fmt.Errorf("failed to mark as delivered: %w", err)
+	}
+
+	// Publish event
+	metadata := shared_events.NewEventMetadata(
+		shared_events.EventType("sales_order.delivered"),
+		shared_events.AggregateType("sales_order"),
+		salesOrder.ID.String(),
+	)
+	event := domain.SalesOrderDeliveredEvent{
+		SalesOrderID:  salesOrder.ID.String(),
+		DeliveredDate: req.DeliveredDate,
 	}
 	s.eventPublisher.Publish(context.Background(), metadata, event)
 
@@ -675,6 +812,32 @@ func (s *SalesOrderService) toSalesOrderResponse(ctx context.Context, salesOrder
 		shippingCountry = customer.ShippingCountry
 	}
 
+	// Override/Load addresses from individual IDs if set
+	if salesOrder.BillingAddressID != nil {
+		if addr, err := s.rmRepo.GetAddress(ctx, *salesOrder.BillingAddressID); err == nil && addr != nil {
+			billingStreet = addr.Street1
+			if addr.Street2 != "" {
+				billingStreet = addr.Street1 + ", " + addr.Street2
+			}
+			billingCity = addr.City
+			billingState = addr.State
+			billingCode = addr.PostalCode
+			billingCountry = addr.Country
+		}
+	}
+	if salesOrder.ShippingAddressID != nil {
+		if addr, err := s.rmRepo.GetAddress(ctx, *salesOrder.ShippingAddressID); err == nil && addr != nil {
+			shippingStreet = addr.Street1
+			if addr.Street2 != "" {
+				shippingStreet = addr.Street1 + ", " + addr.Street2
+			}
+			shippingCity = addr.City
+			shippingState = addr.State
+			shippingCode = addr.PostalCode
+			shippingCountry = addr.Country
+		}
+	}
+
 	// Fetch contact info if available
 	var contact *dto.ContactResponse
 	if salesOrder.ContactID != nil {
@@ -700,8 +863,10 @@ func (s *SalesOrderService) toSalesOrderResponse(ctx context.Context, salesOrder
 		}
 	}
 
-	// Generate subject from order number or use a default
-	if salesOrder.OrderNumber != nil {
+	// Generate subject from order number or use a default if not set
+	if salesOrder.Subject != "" {
+		subject = salesOrder.Subject
+	} else if salesOrder.OrderNumber != nil {
 		subject = fmt.Sprintf("Sales Order %s", *salesOrder.OrderNumber)
 	} else {
 		subject = fmt.Sprintf("Draft Sales Order for %s", customerName)
@@ -720,13 +885,23 @@ func (s *SalesOrderService) toSalesOrderResponse(ctx context.Context, salesOrder
 		SubTotal:       salesOrder.SubTotal,
 		DiscountTotal:  salesOrder.DiscountTotal,
 		TaxTotal:       salesOrder.TaxTotal,
+		TDSPercentage:   salesOrder.TDSPercentage,
 		TDSAmount:      salesOrder.TDSAmount,
+		TCSPercentage:   salesOrder.TCSPercentage,
 		TCSAmount:      salesOrder.TCSAmount,
+		Adjustment:      salesOrder.Adjustment,
+		ExciseDuty:      salesOrder.ExciseDuty,
+		SalesCommission: salesOrder.SalesCommission,
 		TotalAmount:    salesOrder.TotalAmount,
 		InvoiceID:         salesOrder.InvoiceID,
 		ServiceCategoryID: salesOrder.ServiceCategoryID,
 		PartCategoryID:    salesOrder.PartCategoryID,
+		BillingAddressID:  salesOrder.BillingAddressID,
+		ShippingAddressID: salesOrder.ShippingAddressID,
+		ServiceAddressID:  salesOrder.ServiceAddressID,
 		ShippedDate:       ConvertToOrgTZ(ctx, salesOrder.ShippedDate, salesOrder.OrganizationID, s.rmRepo),
+		DeliveredDate:     ConvertToOrgTZ(ctx, salesOrder.DeliveredDate, salesOrder.OrganizationID, s.rmRepo),
+		DueDate:           ConvertToOrgTZ(ctx, salesOrder.DueDate, salesOrder.OrganizationID, s.rmRepo),
 		Terms:          salesOrder.Terms,
 		Notes:          salesOrder.Notes,
 		Items:          items,

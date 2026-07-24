@@ -133,6 +133,18 @@ func AutoMigrate(db *gorm.DB) error {
 	db.Exec("ALTER TABLE IF EXISTS invoices DROP COLUMN IF EXISTS shipping_country")
 	db.Exec("DROP INDEX IF EXISTS idx_invoices_invoice_number")
 
+	// Drop old columns from sales_orders if they exist
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS billing_street")
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS billing_city")
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS billing_state")
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS billing_code")
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS billing_country")
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS shipping_street")
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS shipping_city")
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS shipping_state")
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS shipping_code")
+	db.Exec("ALTER TABLE IF EXISTS sales_orders DROP COLUMN IF EXISTS shipping_country")
+
 	// Auto migrate all models
 	err := db.AutoMigrate(
 		&domain.Invoice{},

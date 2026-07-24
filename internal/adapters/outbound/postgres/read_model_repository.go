@@ -340,5 +340,13 @@ func (r *ReadModelRepository) GetCustomerIDsByEmailAndOrg(ctx context.Context, o
 	return ids, err
 }
 
+func (r *ReadModelRepository) GetAddress(ctx context.Context, id uuid.UUID) (*domain.AddressReadOnly, error) {
+	var addr domain.AddressReadOnly
+	if err := r.db.WithContext(ctx).First(&addr, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &addr, nil
+}
+
 
 

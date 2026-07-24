@@ -212,6 +212,7 @@ func main() {
 	api.HandleFunc("/billing/sales-orders/{id}/confirm", salesOrderHandler.ConfirmSalesOrder).Methods("POST")
 	api.HandleFunc("/billing/sales-orders/{id}/create-invoice", salesOrderHandler.CreateInvoiceFromOrder).Methods("POST")
 	api.HandleFunc("/billing/sales-orders/{id}/ship", salesOrderHandler.MarkAsShipped).Methods("POST")
+	api.HandleFunc("/billing/sales-orders/{id}/deliver", salesOrderHandler.MarkAsDelivered).Methods("POST")
 	api.HandleFunc("/billing/sales-orders/{id}", salesOrderHandler.CancelSalesOrder).Methods("DELETE")
 	api.HandleFunc("/billing/sales-orders/{id}/cancel", salesOrderHandler.CancelSalesOrder).Methods("DELETE")
 

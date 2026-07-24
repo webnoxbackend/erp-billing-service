@@ -18,6 +18,7 @@ const (
 	SalesOrderStatusPartiallyPaid SalesOrderStatus = "partially_paid"
 	SalesOrderStatusPaid          SalesOrderStatus = "paid"
 	SalesOrderStatusShipped       SalesOrderStatus = "shipped"
+	SalesOrderStatusDelivered     SalesOrderStatus = "delivered"
 	SalesOrderStatusCompleted     SalesOrderStatus = "completed"
 	SalesOrderStatusCancelled     SalesOrderStatus = "cancelled"
 )
@@ -29,22 +30,33 @@ type SalesOrder struct {
 	CustomerID     uuid.UUID        `gorm:"type:uuid;index" json:"customer_id"`
 	ContactID      *uuid.UUID       `gorm:"type:uuid;index" json:"contact_id"`
 	OrderNumber    *string          `gorm:"type:varchar(50);unique" json:"order_number"`
+	Subject        string           `gorm:"type:varchar(255)" json:"subject"`
 	OrderDate      time.Time        `json:"order_date"`
+	DueDate        *time.Time       `json:"due_date,omitempty"`
 	Status         SalesOrderStatus `gorm:"type:varchar(20);default:'draft';index" json:"status"`
 
 	// Financial fields
-	SubTotal      float64 `gorm:"type:decimal(15,2)" json:"sub_total"`
-	DiscountTotal float64 `gorm:"type:decimal(15,2);default:0" json:"discount_total"`
-	TaxTotal      float64 `gorm:"type:decimal(15,2);default:0" json:"tax_total"`
-	TDSAmount     float64 `gorm:"type:decimal(15,2);default:0" json:"tds_amount"`
-	TCSAmount     float64 `gorm:"type:decimal(15,2);default:0" json:"tcs_amount"`
-	TotalAmount   float64 `gorm:"type:decimal(15,2)" json:"total_amount"`
+	SubTotal        float64 `gorm:"type:decimal(15,2)" json:"sub_total"`
+	DiscountTotal   float64 `gorm:"type:decimal(15,2);default:0" json:"discount_total"`
+	TaxTotal        float64 `gorm:"type:decimal(15,2);default:0" json:"tax_total"`
+	Adjustment      float64 `gorm:"type:decimal(15,2);default:0" json:"adjustment"`
+	ExciseDuty      float64 `gorm:"type:decimal(15,2);default:0" json:"excise_duty"`
+	SalesCommission float64 `gorm:"type:decimal(15,2);default:0" json:"sales_commission"`
+	TDSPercentage   float64 `gorm:"type:decimal(15,2);default:0" json:"tds_percentage"`
+	TDSAmount       float64 `gorm:"type:decimal(15,2);default:0" json:"tds_amount"`
+	TCSPercentage   float64 `gorm:"type:decimal(15,2);default:0" json:"tcs_percentage"`
+	TCSAmount       float64 `gorm:"type:decimal(15,2);default:0" json:"tcs_amount"`
+	TotalAmount     float64 `gorm:"type:decimal(15,2)" json:"total_amount"`
 
 	// References
 	InvoiceID         *uuid.UUID `gorm:"type:uuid;index" json:"invoice_id"`
 	ServiceCategoryID *uuid.UUID `gorm:"type:uuid;index" json:"service_category_id,omitempty"`
 	PartCategoryID    *uuid.UUID `gorm:"type:uuid;index" json:"part_category_id,omitempty"`
 	ShippedDate       *time.Time `json:"shipped_date,omitempty"`
+	DeliveredDate     *time.Time `json:"delivered_date,omitempty"`
+	BillingAddressID  *uuid.UUID `gorm:"type:uuid;index" json:"billing_address_id,omitempty"`
+	ShippingAddressID *uuid.UUID `gorm:"type:uuid;index" json:"shipping_address_id,omitempty"`
+	ServiceAddressID  *uuid.UUID `gorm:"type:uuid;index" json:"service_address_id,omitempty"`
 
 	// Additional details
 	Terms string `gorm:"type:text" json:"terms"`
@@ -101,9 +113,14 @@ func (so *SalesOrder) CanShip() bool {
 	return so.Status == SalesOrderStatusPaid && so.ShippedDate == nil
 }
 
-// CanReturn returns true if the order can have returns created
+// CanDeliver returns true if the order can be marked as delivered
+func (so *SalesOrder) CanDeliver() bool {
+	return (so.Status == SalesOrderStatusShipped || so.ShippedDate != nil) && so.DeliveredDate == nil
+}
+
+// CanReturn returns true if the order can have returns created (must be delivered)
 func (so *SalesOrder) CanReturn() bool {
-	return (so.Status == SalesOrderStatusPaid || so.Status == SalesOrderStatusShipped) && so.ShippedDate != nil
+	return so.Status == SalesOrderStatusDelivered || so.DeliveredDate != nil || so.Status == SalesOrderStatusCompleted
 }
 
 // CanCancel returns true if the order can be cancelled
@@ -121,7 +138,8 @@ func (so *SalesOrder) CanTransitionTo(newStatus SalesOrderStatus) error {
 		SalesOrderStatusInvoiced:      {SalesOrderStatusPartiallyPaid, SalesOrderStatusPaid},
 		SalesOrderStatusPartiallyPaid: {SalesOrderStatusPaid},
 		SalesOrderStatusPaid:          {SalesOrderStatusShipped},
-		SalesOrderStatusShipped:       {SalesOrderStatusCompleted},
+		SalesOrderStatusShipped:       {SalesOrderStatusDelivered, SalesOrderStatusCompleted},
+		SalesOrderStatusDelivered:     {SalesOrderStatusCompleted},
 		SalesOrderStatusCompleted:     {}, // Terminal state
 		SalesOrderStatusCancelled:     {}, // Terminal state
 	}
@@ -152,8 +170,8 @@ func (so *SalesOrder) CalculateTotals() {
 		so.TaxTotal += item.Tax
 	}
 
-	// Total = SubTotal - Discount + Tax - TDS + TCS
-	so.TotalAmount = so.SubTotal - so.DiscountTotal + so.TaxTotal - so.TDSAmount + so.TCSAmount
+	// Total = SubTotal - Discount + Tax - TDS + TCS + Adjustment + ExciseDuty
+	so.TotalAmount = so.SubTotal - so.DiscountTotal + so.TaxTotal - so.TDSAmount + so.TCSAmount + so.Adjustment + so.ExciseDuty
 }
 
 // Validate performs business rule validation

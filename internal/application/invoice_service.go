@@ -66,11 +66,16 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		sourceSystem = domain.SourceSystem(req.SourceSystem)
 	}
 
-	// Debug: trace ServiceCategoryID at CreateInvoice entry
+	// Debug: trace ServiceCategoryID and PartCategoryID at CreateInvoice entry
 	if req.ServiceCategoryID != nil {
 		log.Printf("[CreateInvoice] req.ServiceCategoryID = %s (source: %s)", req.ServiceCategoryID.String(), sourceSystem)
 	} else {
 		log.Printf("[CreateInvoice] req.ServiceCategoryID is NIL (source: %s)", sourceSystem)
+	}
+	if req.PartCategoryID != nil {
+		log.Printf("[CreateInvoice] req.PartCategoryID = %s (source: %s)", req.PartCategoryID.String(), sourceSystem)
+	} else {
+		log.Printf("[CreateInvoice] req.PartCategoryID is NIL (source: %s)", sourceSystem)
 	}
 
 	ownerID := req.OwnerID
@@ -168,6 +173,7 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 		SalesOrder:        req.SalesOrder,
 		PurchaseOrder:     req.PurchaseOrder,
 		ServiceCategoryID: req.ServiceCategoryID,
+		PartCategoryID:    req.PartCategoryID,
 		Terms:           req.Terms,
 		Notes:           req.Notes,
 		BillingAddressID:  billingAddressID,
@@ -278,6 +284,7 @@ func (s *InvoiceService) CreateInvoice(ctx context.Context, orgID uuid.UUID, req
 			Tax:               itemReq.Tax,
 			Total:             itemTotal,
 			ServiceCategoryID: itemReq.ServiceCategoryID,
+			PartCategoryID:    itemReq.PartCategoryID,
 			Metadata:          metadataJSON, // Store module-specific metadata
 		})
 
@@ -450,6 +457,7 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 		ShippingCode:      shippingCode,
 		ShippingCountry:   shippingCountry,
 		ServiceCategoryID: req.ServiceCategoryID,
+		PartCategoryID:    req.PartCategoryID,
 	}
 
 	// Convert estimate items to invoice items
@@ -490,6 +498,7 @@ func (s *InvoiceService) CreateInvoiceFromEstimate(ctx context.Context, orgID uu
 			Tax:               itemReq.Tax,
 			Total:             itemTotal,
 			ServiceCategoryID: req.ServiceCategoryID,
+			PartCategoryID:    req.PartCategoryID,
 		})
 
 		subTotal += (itemReq.Quantity * itemReq.UnitPrice)
@@ -600,6 +609,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 		invoice.OwnerID = req.OwnerID
 	}
 	invoice.ServiceCategoryID = req.ServiceCategoryID
+	invoice.PartCategoryID = req.PartCategoryID
 	invoice.Notes = req.Notes
 	invoice.BillingAddressID = req.BillingAddressID
 	invoice.ShippingAddressID = req.ShippingAddressID
@@ -676,6 +686,7 @@ func (s *InvoiceService) UpdateInvoice(ctx context.Context, id uuid.UUID, req dt
 			Tax:               itemReq.Tax,
 			Total:             itemTotal,
 			ServiceCategoryID: itemReq.ServiceCategoryID,
+			PartCategoryID:    itemReq.PartCategoryID,
 			Metadata:          metadataJSON,
 		})
 
@@ -1134,6 +1145,7 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 		PaymentTerms:    inv.PaymentTerms,
 		Currency:        inv.Currency,
 		ServiceCategoryID: inv.ServiceCategoryID,
+		PartCategoryID:    inv.PartCategoryID,
 		OwnerID:         inv.OwnerID,
 		CustomerID:        inv.CustomerID,
 		ContactID:         inv.ContactID,
@@ -1216,6 +1228,7 @@ func (s *InvoiceService) mapToResponse(ctx context.Context, inv *domain.Invoice)
 				Tax:               item.Tax,
 				Total:             item.Total,
 				ServiceCategoryID: item.ServiceCategoryID,
+				PartCategoryID:    item.PartCategoryID,
 			}
 
 			// Deserialize metadata if present

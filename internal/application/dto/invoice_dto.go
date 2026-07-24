@@ -26,6 +26,7 @@ type CreateInvoiceRequest struct {
 	SalesOrderID      *uuid.UUID          `json:"sales_order_id"`
 	PurchaseOrder     string              `json:"purchase_order"`
 	ServiceCategoryID *uuid.UUID          `json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID          `json:"part_category_id,omitempty"`
 	Currency        string              `json:"currency"`
 	Adjustment      float64             `json:"adjustment"`
 	ExciseDuty      float64             `json:"excise_duty"`
@@ -55,6 +56,7 @@ type CreateInvoiceItem struct {
 	Discount    float64    `json:"discount"`
 	Tax         float64    `json:"tax"`
 	ServiceCategoryID *uuid.UUID `json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID `json:"part_category_id,omitempty"`
 	// Module-specific metadata (FSM: technician_id, CRM: deal_id, etc.)
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -83,6 +85,7 @@ type InvoiceResponse struct {
 	PaymentTerms    string     `json:"payment_terms"`
 	Currency        string     `json:"currency"`
 	ServiceCategoryID *uuid.UUID `json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID `json:"part_category_id,omitempty"`
 	OwnerID         *uuid.UUID `json:"owner_id"`
 	CustomerID         uuid.UUID  `json:"customer_id"`
 	ContactID          *uuid.UUID `json:"contact_id"`
@@ -139,6 +142,7 @@ type ItemResponse struct {
 	Tax         float64    `json:"tax"`
 	Total       float64    `json:"total"`
 	ServiceCategoryID *uuid.UUID `json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID `json:"part_category_id,omitempty"`
 	// Module-specific metadata returned as-is
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }

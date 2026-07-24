@@ -72,6 +72,7 @@ type Invoice struct {
 	// Sales Order reference - populated when invoice is created from sales order
 	SalesOrderID *uuid.UUID `gorm:"type:uuid;index" json:"sales_order_id"`
 	ServiceCategoryID *uuid.UUID `gorm:"type:uuid;index" json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID `gorm:"type:uuid;index" json:"part_category_id,omitempty"`
 
 	// TDS/TCS amounts
 	TDSAmount float64 `gorm:"type:decimal(15,2);default:0" json:"tds_amount"`
@@ -183,6 +184,7 @@ type InvoiceItem struct {
 	Tax         float64    `gorm:"type:decimal(15,2)" json:"tax"`
 	Total       float64    `gorm:"type:decimal(15,2)" json:"total"`
 	ServiceCategoryID *uuid.UUID `gorm:"type:uuid;index" json:"service_category_id,omitempty"`
+	PartCategoryID    *uuid.UUID `gorm:"type:uuid;index" json:"part_category_id,omitempty"`
 
 	// Metadata stores module-specific data without schema changes
 	// Examples:
