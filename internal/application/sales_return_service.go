@@ -3,12 +3,14 @@ package application
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"erp-billing-service/internal/application/dto"
 	"erp-billing-service/internal/domain"
 	"erp-billing-service/internal/ports/outbound"
 	"erp-billing-service/internal/ports/repositories"
+	"erp-billing-service/internal/validation"
 
 	shared_events "github.com/efs/shared-events"
 	"github.com/google/uuid"
@@ -48,6 +50,18 @@ func NewSalesReturnService(
 
 // CreateSalesReturn creates and approves a new sales return
 func (s *SalesReturnService) CreateSalesReturn(req *dto.CreateSalesReturnRequest) (*dto.SalesReturnResponse, error) {
+	// Subscription limit validation
+	subClient := validation.NewSubscriptionClient()
+	if subClient != nil && req.OrganizationID != uuid.Nil {
+		orgIDStr := req.OrganizationID.String()
+		allowed, msg, err := subClient.ValidateRestriction(orgIDStr, validation.RestrictionKeyMaxSalesReturns)
+		if err != nil {
+			log.Printf("[Subscription] Validation error for org %s: %v — allowing (fail-open)", orgIDStr, err)
+		} else if !allowed {
+			return nil, fmt.Errorf("%s", msg)
+		}
+	}
+
 	// Retrieve sales order
 	salesOrder, err := s.salesOrderRepo.FindByID(req.SalesOrderID)
 	if err != nil {

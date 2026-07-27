@@ -19,6 +19,7 @@ import (
 	"erp-billing-service/internal/application"
 	"erp-billing-service/internal/config"
 	"erp-billing-service/internal/database"
+	"erp-billing-service/internal/validation"
 
 	shared_kafka "github.com/efs/shared-kafka"
 	"github.com/gorilla/mux"
@@ -41,6 +42,10 @@ func main() {
 	if err := database.AutoMigrate(db); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
+
+	// Initialize subscription validation DB & start background replication
+	validation.InitDB(db)
+	validation.StartSync(context.Background(), db, os.Getenv("ORGANIZATION_DB_URL"))
 
 	// 4. Initialize Kafka Producer
 	kafkaCfg := shared_kafka.LoadConfigFromEnv()
@@ -213,8 +218,8 @@ func main() {
 	api.HandleFunc("/billing/sales-orders/{id}/create-invoice", salesOrderHandler.CreateInvoiceFromOrder).Methods("POST")
 	api.HandleFunc("/billing/sales-orders/{id}/ship", salesOrderHandler.MarkAsShipped).Methods("POST")
 	api.HandleFunc("/billing/sales-orders/{id}/deliver", salesOrderHandler.MarkAsDelivered).Methods("POST")
-	api.HandleFunc("/billing/sales-orders/{id}", salesOrderHandler.CancelSalesOrder).Methods("DELETE")
-	api.HandleFunc("/billing/sales-orders/{id}/cancel", salesOrderHandler.CancelSalesOrder).Methods("DELETE")
+	api.HandleFunc("/billing/sales-orders/{id}", salesOrderHandler.DeleteSalesOrder).Methods("DELETE")
+	api.HandleFunc("/billing/sales-orders/{id}/cancel", salesOrderHandler.CancelSalesOrder).Methods("POST", "DELETE")
 
 	// Sales Return Routes
 	api.HandleFunc("/billing/sales-returns", salesReturnHandler.CreateSalesReturn).Methods("POST")

@@ -42,7 +42,14 @@ func (h *SalesReturnHandler) CreateSalesReturn(w http.ResponseWriter, r *http.Re
 	salesReturn, err := h.service.CreateSalesReturn(&req)
 	if err != nil {
 		log.Printf("[ERROR] Failed to create sales return: %v", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		errStr := err.Error()
+		if strings.Contains(errStr, "limit reached") || strings.Contains(errStr, "upgrade your subscription") || strings.HasPrefix(errStr, "plan limit reached") {
+			w.WriteHeader(http.StatusForbidden)
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		json.NewEncoder(w).Encode(map[string]string{"error": errStr})
 		return
 	}
 

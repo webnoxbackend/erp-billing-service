@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"erp-billing-service/internal/domain"
 	"erp-billing-service/internal/ports/outbound"
 	"erp-billing-service/internal/ports/repositories"
+	"erp-billing-service/internal/validation"
 
 	shared_events "github.com/efs/shared-events"
 	"github.com/google/uuid"
@@ -46,6 +48,18 @@ func NewSalesOrderService(
 
 // CreateSalesOrder creates a new sales order in draft status
 func (s *SalesOrderService) CreateSalesOrder(req *dto.CreateSalesOrderRequest) (*dto.SalesOrderResponse, error) {
+	// Subscription limit validation
+	subClient := validation.NewSubscriptionClient()
+	if subClient != nil && req.OrganizationID != uuid.Nil {
+		orgIDStr := req.OrganizationID.String()
+		allowed, msg, err := subClient.ValidateRestriction(orgIDStr, validation.RestrictionKeyMaxSalesOrders)
+		if err != nil {
+			log.Printf("[Subscription] Validation error for org %s: %v — allowing (fail-open)", orgIDStr, err)
+		} else if !allowed {
+			return nil, fmt.Errorf("%s", msg)
+		}
+	}
+
 	// Check stock availability if inventory client is available
 	if s.inventoryClient != nil {
 		stockItems := make([]outbound.StockCheckItem, 0)
@@ -652,6 +666,35 @@ func (s *SalesOrderService) MarkAsDelivered(id uuid.UUID, req *dto.MarkAsDeliver
 	s.eventPublisher.Publish(context.Background(), metadata, event)
 
 	return s.toSalesOrderResponse(context.Background(), salesOrder), nil
+}
+
+// DeleteSalesOrder soft-deletes a sales order
+func (s *SalesOrderService) DeleteSalesOrder(id uuid.UUID) error {
+	salesOrder, err := s.salesOrderRepo.FindByID(id)
+	if err != nil {
+		return fmt.Errorf("failed to find sales order: %w", err)
+	}
+
+	// Restore stock if order was confirmed or shipped before deleting
+	if salesOrder.Status == domain.SalesOrderStatusConfirmed || salesOrder.Status == domain.SalesOrderStatusShipped {
+		if s.inventoryClient != nil {
+			stockItems := make([]outbound.StockCheckItem, 0)
+			for _, item := range salesOrder.Items {
+				itemTypeLower := strings.ToLower(item.ItemType)
+				if itemTypeLower == "goods" || itemTypeLower == "product" || itemTypeLower == "part" || itemTypeLower == "" {
+					stockItems = append(stockItems, outbound.StockCheckItem{
+						ItemID:   item.ItemID.String(),
+						Quantity: int32(item.Quantity),
+					})
+				}
+			}
+			if len(stockItems) > 0 {
+				_ = s.inventoryClient.UpdateStock(context.Background(), stockItems, "return", "sales_order_deletion", salesOrder.ID.String(), "Sales Order Deleted - Stock Restored")
+			}
+		}
+	}
+
+	return s.salesOrderRepo.Delete(id)
 }
 
 // CancelSalesOrder cancels a sales order

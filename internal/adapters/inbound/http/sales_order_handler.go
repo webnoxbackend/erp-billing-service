@@ -41,12 +41,15 @@ func (h *SalesOrderHandler) CreateSalesOrder(w http.ResponseWriter, r *http.Requ
 	order, err := h.service.CreateSalesOrder(&req)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(err.Error(), "validation failed") || strings.Contains(err.Error(), "stock unavailable") {
+		errStr := err.Error()
+		if strings.Contains(errStr, "limit reached") || strings.Contains(errStr, "upgrade your subscription") || strings.HasPrefix(errStr, "plan limit reached") {
+			w.WriteHeader(http.StatusForbidden)
+		} else if strings.Contains(errStr, "validation failed") || strings.Contains(errStr, "stock unavailable") {
 			w.WriteHeader(http.StatusBadRequest)
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"error": errStr})
 		return
 	}
 
@@ -276,7 +279,29 @@ func (h *SalesOrderHandler) MarkAsDelivered(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(order)
 }
 
-// CancelSalesOrder handles DELETE /api/v1/sales-orders/:id
+// DeleteSalesOrder handles DELETE /api/v1/sales-orders/:id
+func (h *SalesOrderHandler) DeleteSalesOrder(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := uuid.Parse(vars["id"])
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid sales order ID"})
+		return
+	}
+
+	if err := h.service.DeleteSalesOrder(id); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Sales order deleted successfully"})
+}
+
+// CancelSalesOrder handles DELETE /api/v1/sales-orders/:id/cancel
 func (h *SalesOrderHandler) CancelSalesOrder(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := uuid.Parse(vars["id"])
