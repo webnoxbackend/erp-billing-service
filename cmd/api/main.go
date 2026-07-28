@@ -43,9 +43,11 @@ func main() {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
-	// Initialize subscription validation DB & start background replication
+	// Initialize subscription validation DB
+	// NOTE: Subscription data is now synced via Kafka (subscription_consumer.go)
+	// The old direct-DB StartSync has been removed in favour of event-driven sync.
 	validation.InitDB(db)
-	validation.StartSync(context.Background(), db, os.Getenv("ORGANIZATION_DB_URL"))
+	_ = context.Background() // retained for other usage
 
 	// 4. Initialize Kafka Producer
 	kafkaCfg := shared_kafka.LoadConfigFromEnv()
@@ -143,6 +145,15 @@ func main() {
 	}
 	consumerGroup.Start()
 	defer consumerGroup.Stop()
+
+	// Start subscription consumer for syncing plans/subscriptions into local readonly tables
+	subConsumer, err := kafka.StartSubscriptionConsumer(kafkaCfg, db)
+	if err != nil {
+		log.Printf("Warning: Failed to start billing subscription consumer: %v — plan limit checks will fail-open", err)
+	} else {
+		defer subConsumer.Stop()
+		log.Println("Billing subscription consumer started (syncing plans + org subscriptions)")
+	}
 
 	// 8. Initialize HTTP Handlers
 	invoiceHandler := billing_http.NewInvoiceHandler(invoiceService)
