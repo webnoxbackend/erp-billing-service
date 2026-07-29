@@ -24,7 +24,7 @@ RUN for i in 1 2 3; do go mod download && break || (echo "Retry $i..." && sleep 
 COPY erp-billing-service .
 
 # Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -tags dynamic -a -installsuffix cgo -o billing-service ./cmd/api
+RUN CGO_ENABLED=1 GOOS=linux go build -buildvcs=false -tags dynamic -a -installsuffix cgo -o billing-service ./cmd/api
 
 # Runtime stage
 FROM alpine:latest
