@@ -158,6 +158,38 @@ func (h *SubscriptionEventHandler) handleOrgSubscribed(ctx context.Context, raw 
 	}
 	log.Printf("[BillingSubConsumer] Upserted org subscription %s for org %s (status=%s)",
 		payload.SubscriptionID, payload.OrganizationID, payload.Status)
+
+	// Sync organization_subscription_items_readonly (Table 4)
+	// Each item represents one module's (efs/crm/ims) plan assignment within the subscription.
+	if len(payload.Items) > 0 {
+		for _, item := range payload.Items {
+			itemErr := h.db.WithContext(ctx).Exec(`
+				INSERT INTO organization_subscription_items_readonly (id, subscription_id, module_slug, plan_id, quantity, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT (id) DO UPDATE SET
+					subscription_id = EXCLUDED.subscription_id,
+					module_slug     = EXCLUDED.module_slug,
+					plan_id         = EXCLUDED.plan_id,
+					quantity        = EXCLUDED.quantity,
+					updated_at      = EXCLUDED.updated_at
+			`, item.ID, item.SubscriptionID, item.ModuleSlug, item.PlanID, item.Quantity, item.CreatedAt, item.UpdatedAt).Error
+			if itemErr != nil {
+				log.Printf("[BillingSubConsumer] Failed to upsert subscription item %s (module=%s): %v", item.ID, item.ModuleSlug, itemErr)
+			}
+		}
+
+		// Remove stale items no longer part of this subscription
+		itemIDs := make([]string, 0, len(payload.Items))
+		for _, item := range payload.Items {
+			itemIDs = append(itemIDs, item.ID)
+		}
+		h.db.WithContext(ctx).Exec(
+			`DELETE FROM organization_subscription_items_readonly WHERE subscription_id = ? AND id NOT IN ?`,
+			payload.SubscriptionID, itemIDs,
+		)
+		log.Printf("[BillingSubConsumer] Synced %d subscription items for sub %s", len(payload.Items), payload.SubscriptionID)
+	}
+
 	return nil
 }
 

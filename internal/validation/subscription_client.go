@@ -106,9 +106,9 @@ func (c *SubscriptionClient) ValidateRestrictionDetailed(orgID, restrictionKey s
 		return false, "No active subscription. Please subscribe to a plan.", 0, 0, nil
 	}
 
-	// Check expiry
+	// Check expiry — guard against zero-time (not yet synced) by checking IsZero()
 	statusLower := strings.ToLower(sub.Status)
-	if (statusLower == "active" || statusLower == "trial" || statusLower == "paid") && time.Now().UTC().After(sub.ExpiryDate) {
+	if (statusLower == "active" || statusLower == "trial" || statusLower == "paid") && !sub.ExpiryDate.IsZero() && time.Now().UTC().After(sub.ExpiryDate) {
 		return false, "Subscription expired. Please renew your plan to perform this action.", 0, 0, nil
 	}
 
