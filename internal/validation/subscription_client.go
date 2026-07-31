@@ -76,34 +76,18 @@ func (c *SubscriptionClient) ValidateRestrictionDetailed(orgID, restrictionKey s
 		Scan(&sub).Error
 
 	if err != nil || sub.ID == "" {
+		// Fallback 1: check if org has an explicit expired or cancelled subscription
 		var expiredCount int64
 		c.db.Table("organization_subscriptions_readonly").
-			Where("organization_id = ? AND LOWER(status) = ?", orgID, "expired").
+			Where("organization_id = ? AND LOWER(status) IN ?", orgID, []string{"expired", "cancelled"}).
 			Count(&expiredCount)
 		if expiredCount > 0 {
 			return false, "Subscription expired. Please renew your plan.", 0, 0, nil
 		}
 
-		// Fail-open: if replica table has 0 rows, Kafka sync is pending
-		var totalSubRows int64
-		c.db.Table("organization_subscriptions_readonly").Count(&totalSubRows)
-		if totalSubRows == 0 {
-			log.Printf("[SubscriptionClient] Warning: organization_subscriptions_readonly has 0 total rows (Kafka sync pending) — allowing %s for org %s (fail-open)", restrictionKey, orgID)
-			return true, "Subscription sync pending — allowed (fail-open)", -1, 0, nil
-		}
-
-		// Fail-open: org not found in readonly table but table has rows — newly registered org,
-		// Kafka OrganizationSubscribed event may not have been consumed yet.
-		var orgAnySubCount int64
-		c.db.Table("organization_subscriptions_readonly").
-			Where("organization_id = ?", orgID).
-			Count(&orgAnySubCount)
-		if orgAnySubCount == 0 {
-			log.Printf("[SubscriptionClient] Warning: No subscription for org %s in billing readonly table — newly registered org (Kafka event pending). Allowing %s (fail-open)", orgID, restrictionKey)
-			return true, "New organization — subscription sync pending, allowed (fail-open)", -1, 0, nil
-		}
-
-		return false, "No active subscription. Please subscribe to a plan.", 0, 0, nil
+		// Fallback 2: New organization or replica sync pending — allow initial access
+		log.Printf("[SubscriptionClient] Info: No explicit subscription found for org %s — allowing %s under initial trial defaults", orgID, restrictionKey)
+		return true, "Initial trial subscription — allowed", -1, 0, nil
 	}
 
 	// Check expiry — guard against zero-time (not yet synced) by checking IsZero()
