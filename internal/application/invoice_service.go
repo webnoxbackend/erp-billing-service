@@ -981,6 +981,17 @@ func (s *InvoiceService) DeleteInvoice(ctx context.Context, id uuid.UUID) error 
 	return nil
 }
 
+type autoRemoveFileReader struct {
+	*os.File
+	path string
+}
+
+func (r *autoRemoveFileReader) Close() error {
+	err := r.File.Close()
+	os.Remove(r.path)
+	return err
+}
+
 func (s *InvoiceService) GetInvoicePDFStream(ctx context.Context, id uuid.UUID) (io.ReadCloser, string, error) {
 	invoice, err := s.invoiceRepo.GetByID(ctx, id)
 	if err != nil {
@@ -990,40 +1001,56 @@ func (s *InvoiceService) GetInvoicePDFStream(ctx context.Context, id uuid.UUID) 
 		return nil, "", fmt.Errorf("invoice not found")
 	}
 
-	var pdfPath string
+	// 1. If PDFPath is set in DB, try fetching from S3 first
 	if invoice.PDFPath != nil && *invoice.PDFPath != "" && !strings.HasPrefix(*invoice.PDFPath, "/") {
-		pdfPath = *invoice.PDFPath
-	} else {
-		// Generate the local PDF file using GetInvoicePDF
-		localPath, err := s.GetInvoicePDF(ctx, id)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to generate local invoice PDF: %w", err)
+		stream, contentType, err := s.s3Service.GetFile(*invoice.PDFPath)
+		if err == nil {
+			return stream, contentType, nil
 		}
-		defer os.Remove(localPath) // Clean up the local temp PDF
+		fmt.Printf("[WARN] Failed to fetch PDF from S3 (%s): %v. Regenerating locally...\n", *invoice.PDFPath, err)
+	}
 
-		file, err := os.Open(localPath)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to open generated PDF file: %w", err)
-		}
-		defer file.Close()
+	// 2. Generate local PDF file using GetInvoicePDF
+	localPath, err := s.GetInvoicePDF(ctx, id)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate local invoice PDF: %w", err)
+	}
 
-		// Key: {RootFolder}/invoices/{OrganizationID}/{InvoiceID}.pdf
+	// 3. Attempt uploading to S3 if s3Service is available
+	if s.s3Service != nil {
 		s3Key := fmt.Sprintf("%s/invoices/%s/%s.pdf", s.s3Service.Config.RootFolder, invoice.OrganizationID.String(), invoice.ID.String())
-		err = s.s3Service.UploadFile(s3Key, "application/pdf", file)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to upload PDF to S3: %w", err)
-		}
-
-		pdfPath = s3Key
-		if invoice.Status != domain.InvoiceStatusDraft {
-			invoice.PDFPath = &pdfPath
-			if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
-				fmt.Printf("[ERROR] Failed to update PDFPath in DB: %v\n", err)
+		file, errOpen := os.Open(localPath)
+		if errOpen == nil {
+			defer file.Close()
+			errUpload := s.s3Service.UploadFile(s3Key, "application/pdf", file)
+			if errUpload == nil {
+				if invoice.Status != domain.InvoiceStatusDraft {
+					pdfPath := s3Key
+					invoice.PDFPath = &pdfPath
+					if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
+						fmt.Printf("[ERROR] Failed to update PDFPath in DB: %v\n", err)
+					}
+				}
+				// Fetch clean stream from S3
+				stream, contentType, errGet := s.s3Service.GetFile(s3Key)
+				if errGet == nil {
+					os.Remove(localPath)
+					return stream, contentType, nil
+				}
+			} else {
+				fmt.Printf("[WARN] Failed to upload PDF to S3: %v. Serving local temp file\n", errUpload)
 			}
 		}
 	}
 
-	return s.s3Service.GetFile(pdfPath)
+	// 4. Fallback: serve local temp PDF directly from disk (cleaning up on stream close)
+	tempFile, err := os.Open(localPath)
+	if err != nil {
+		os.Remove(localPath)
+		return nil, "", fmt.Errorf("failed to open local temp PDF file: %w", err)
+	}
+
+	return &autoRemoveFileReader{File: tempFile, path: localPath}, "application/pdf", nil
 }
 
 func (s *InvoiceService) ListInvoicesByCustomerEmail(ctx context.Context, orgID uuid.UUID, customerEmail string, statusFilter string) ([]dto.InvoiceResponse, error) {
