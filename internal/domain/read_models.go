@@ -255,6 +255,10 @@ type OrganizationRM struct {
 	Website          string    `gorm:"type:text" json:"website"`
 	Currency         string    `gorm:"type:varchar(10)" json:"currency"`
 	Timezone         string    `gorm:"type:varchar(100)" json:"timezone"`
+	BusinessCategory string    `gorm:"type:varchar(255)" json:"business_category"`
+	Language         string    `gorm:"type:varchar(50)" json:"language"`
+	CollectsTax      bool      `gorm:"default:false" json:"collects_tax"`
+	GSTIN            string    `gorm:"type:varchar(50)" json:"gstin"`
 	IsActive         bool      `gorm:"default:true" json:"is_active"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`

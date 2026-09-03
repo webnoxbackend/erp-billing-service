@@ -1074,6 +1074,10 @@ func (h *EventHandler) handleOrganizationEvent(tx *gorm.DB, event *shared_events
 			Website:          payload.Domain,
 			Currency:         payload.Currency,
 			Timezone:         payload.Timezone,
+			BusinessCategory: payload.BusinessCategory,
+			Language:         payload.Language,
+			CollectsTax:      payload.CollectsTax,
+			GSTIN:            payload.GSTIN,
 			IsActive:         payload.Status == "active",
 			CreatedAt:        event.Metadata.OccurredAt,
 			UpdatedAt:        event.Metadata.OccurredAt,
@@ -1111,6 +1115,16 @@ func (h *EventHandler) handleOrganizationEvent(tx *gorm.DB, event *shared_events
 		}
 		if payload.OrganizationType != "" || isUpdated("organization_type") {
 			updates["organization_type"] = payload.OrganizationType
+		}
+		if payload.BusinessCategory != "" || isUpdated("business_category") {
+			updates["business_category"] = payload.BusinessCategory
+		}
+		if payload.Language != "" || isUpdated("language") {
+			updates["language"] = payload.Language
+		}
+		updates["collects_tax"] = payload.CollectsTax
+		if payload.GSTIN != "" || isUpdated("gstin") {
+			updates["gstin"] = payload.GSTIN
 		}
 		if payload.Address != "" || isUpdated("address") {
 			updates["address"] = payload.Address
