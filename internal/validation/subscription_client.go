@@ -70,7 +70,7 @@ func (c *SubscriptionClient) ValidateRestrictionDetailed(orgID, restrictionKey s
 		ExpiryDate time.Time
 	}
 	err := c.db.Table("organization_subscriptions_readonly").
-		Where("organization_id = ? AND LOWER(status) IN ?", orgID, []string{"active", "trial", "paid"}).
+		Where("organization_id = ? AND LOWER(status) IN ?", orgID, []string{"active", "trial", "paid", "unpaid"}).
 		Order("created_at DESC").
 		Limit(1).
 		Scan(&sub).Error
