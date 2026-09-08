@@ -20,12 +20,14 @@ import (
 type EventHandler struct {
 	db             *gorm.DB
 	invoiceService *application.InvoiceService
+	paymentService *application.PaymentService
 }
 
-func NewEventHandler(db *gorm.DB, invoiceService *application.InvoiceService) *EventHandler {
+func NewEventHandler(db *gorm.DB, invoiceService *application.InvoiceService, paymentService *application.PaymentService) *EventHandler {
 	return &EventHandler{
 		db:             db,
 		invoiceService: invoiceService,
+		paymentService: paymentService,
 	}
 }
 
@@ -1938,6 +1940,25 @@ func (h *EventHandler) autoGenerateInvoice(ctx context.Context, workOrderIDStr s
 	}
 	log.Printf("[AutoInvoice] Successfully generated, finalized, and emailed invoice %s for work order %s", 
 		invoiceResp.ID, workOrderIDStr)
+
+	// 8. If work order was marked Paid on-site by technician, auto-record payment so invoice is marked PAID
+	if strings.EqualFold(wo.BillingStatus, "Paid") && h.paymentService != nil {
+		log.Printf("[AutoInvoice] Work order %s was marked as Paid on-site. Recording payment for invoice %s...", workOrderIDStr, invoiceResp.ID)
+		payReq := dto.RecordPaymentRequest{
+			InvoiceID:   invoiceResp.ID,
+			Amount:      invoiceResp.TotalAmount,
+			Method:      "other",
+			Reference:   "ON_SITE_COLLECTION",
+			PaymentDate: time.Now().UTC().Format("2006-01-02"),
+			Notes:       fmt.Sprintf("On-site payment collected by technician for Work Order: %s", wo.Summary),
+		}
+		paidResp, payErr := h.paymentService.RecordPayment(ctx, payReq)
+		if payErr != nil {
+			log.Printf("[AutoInvoice] [WARNING] Failed to record on-site payment against invoice %s: %v", invoiceResp.ID, payErr)
+		} else {
+			log.Printf("[AutoInvoice] Successfully recorded on-site payment %s for invoice %s (status: %s)", paidResp.ID, invoiceResp.ID, paidResp.Status)
+		}
+	}
 
 	return nil
 }

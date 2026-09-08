@@ -123,7 +123,7 @@ func main() {
 	subscriptionService := application.NewSubscriptionService(subscriptionRepo, invoiceRepo, paymentRepo, rmRepo, eventPublisher, razorpayClient)
 
 	// 7. Initialize Kafka Consumers
-	eventHandler := kafka.NewEventHandler(db, invoiceService)
+	eventHandler := kafka.NewEventHandler(db, invoiceService, paymentService)
 	topics := []string{
 		"crm.customers",
 		"crm.contacts",
